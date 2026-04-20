@@ -28,6 +28,18 @@
   var stream = null;
 
 
+  // ==================== 工具函数 ====================
+  // 生成 trace_id
+  function generateTraceId() {
+    return 'trace_' + Date.now();
+  }
+
+  // 生成唯一 session_id
+  function generateSessionId() {
+    return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
+
+
   // ==================== 事件绑定 ====================
   // 给录音按钮绑定点击事件
   // 点击后的处理逻辑：
@@ -85,6 +97,68 @@
           console.log('录音成功:', audioBlob);
           console.log('Blob 大小:', audioBlob.size, '字节');
           console.log('Blob 类型:', audioBlob.type);
+
+          // 生成 ID
+          const traceId = generateTraceId();
+          const sessionId = generateSessionId();
+
+          // 构造 FormData
+          const formData = new FormData();
+          formData.append('audio', audioBlob, 'recording.webm');
+          formData.append('trace_id', traceId);
+          formData.append('session_id', sessionId);
+
+          // 上传到后端
+          fetch('/api/record', {
+            method: 'POST',
+            body: formData
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.status === 'success') {
+              statusDiv.textContent = '上传成功，正在识别...';
+              console.log('上传成功:', data);
+              
+              // 调用 STT 接口（遵循内部接口规范，使用 payload.input_audio_path）
+              return fetch('/api/stt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  trace_id: traceId,
+                  session_id: sessionId,
+                  payload: {
+                    input_audio_path: data.payload.audio_path
+                  }
+                })
+              });
+            } else {
+              statusDiv.textContent = '上传失败: ' + data.error.message;
+              console.error('上传失败:', data);
+              throw new Error(data.error.message);
+            }
+          })
+          .then(response => response.json())
+          .then(sttData => {
+            if (sttData.status === 'success') {
+              statusDiv.textContent = '识别成功: ' + sttData.payload.text;
+              console.log('STT 识别成功:', sttData);
+              
+              // 回填到文本输入框
+              const chatInput = document.getElementById('chat-input');
+              if (chatInput) {
+                chatInput.value = sttData.payload.text;
+              } else {
+                console.warn('未找到文本输入框 #chat-input');
+              }
+            } else {
+              statusDiv.textContent = '识别失败: ' + sttData.error.message;
+              console.error('STT 识别失败:', sttData);
+            }
+          })
+          .catch(error => {
+            statusDiv.textContent = '识别失败: ' + error.message;
+            console.error('识别错误:', error);
+          });
         };
 
         // 调用 start() 正式开始录音
@@ -130,4 +204,3 @@
     }
   }
 })();
-

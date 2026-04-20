@@ -27,6 +27,15 @@
     <!-- 状态显示区域：用于展示当前录音状态（录音中 / 已停止 / 错误信息） -->
     <div id="status"></div>
 
+    <!-- 聊天输入区域：文本输入框和发送按钮 -->
+    <div class="chat-area">
+      <textarea id="chat-input" placeholder="输入消息..." rows="3" style="width: 80%; resize: vertical;"></textarea>
+      <button id="send-btn" style="padding: 8px 16px; font-size: 14px; cursor: pointer;">发送</button>
+    </div>
+
+    <!-- 聊天记录显示区域 -->
+    <div id="chat-history"></div>
+
     <!-- 引入前端脚本：处理录音按钮的交互逻辑 -->
     <script src="/static/js/chat_page.js"></script>
   </body>
