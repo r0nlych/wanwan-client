@@ -1,6 +1,7 @@
 """
-桌宠本地播放骨架。
-
-阶段 1 只建立目录落点，后续用于本地音频播放控制。
+本地播放控制导出。
 """
 
+from src.wanwan_client.desktop.playback.local_audio_player import LocalAudioPlayer
+
+__all__ = ["LocalAudioPlayer"]

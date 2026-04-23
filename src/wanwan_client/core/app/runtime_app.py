@@ -1,6 +1,5 @@
 """
 配置应用最小入口。
-
 当前阶段职责：
 1. 读取当前设置
 2. 生成当前运行时配置
@@ -14,7 +13,7 @@
 - 文本链路业务
 """
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from src.wanwan_client.core.config.config_manager import ConfigManager
 from src.wanwan_client.core.config.runtime_config import RuntimeConfig
@@ -48,7 +47,6 @@ class RuntimeAppState:
 class RuntimeApp:
     """
     配置应用最小入口。
-
     当前阶段作为应用层收口点，向更上层提供最小配置应用能力。
     """
 
@@ -75,6 +73,17 @@ class RuntimeApp:
         """
         return self.load_state().available_profile_ids
 
+    def get_state_snapshot(self) -> dict[str, object]:
+        """
+        返回本地调试入口所需的最小状态快照。
+        """
+        state = self.load_state()
+        return {
+            "active_profile_id": state.active_profile_id,
+            "available_profile_ids": list(state.available_profile_ids),
+            "runtime_config": asdict(state.runtime_config),
+        }
+
     def switch_active_profile(self, profile_id: str) -> RuntimeAppState:
         """
         切换 active_profile，保存并重新生成 runtime_config。
@@ -92,3 +101,11 @@ class RuntimeApp:
         """
         return self.load_state()
 
+    def save_runtime_config(self, settings: AppSettings | None = None) -> RuntimeAppState:
+        """
+        将当前或指定设置写回本地，并重新生成 runtime_config。
+        """
+        persisted_settings = settings or self.config_manager.load_persisted_settings()
+        self.config_manager.save_settings(persisted_settings)
+        runtime_config = self.config_manager.build_runtime_config(persisted_settings)
+        return RuntimeAppState(settings=persisted_settings, runtime_config=runtime_config)

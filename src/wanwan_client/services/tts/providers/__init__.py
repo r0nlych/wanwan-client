@@ -1,6 +1,13 @@
 """
-TTS provider 适配层骨架。
-
-阶段 1 只建立目录，不写具体 provider 实现。
+TTS provider exports.
 """
 
+from src.wanwan_client.services.tts.providers.doubao_tts import DoubaoTtsProvider
+from src.wanwan_client.services.tts.providers.openai_compatible_tts import OpenAICompatibleTtsProvider
+from src.wanwan_client.services.tts.providers.registry import TtsProviderRegistry
+
+__all__ = [
+    "DoubaoTtsProvider",
+    "OpenAICompatibleTtsProvider",
+    "TtsProviderRegistry",
+]

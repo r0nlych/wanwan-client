@@ -1,6 +1,9 @@
 """
-LLM provider 适配层骨架。
-
-阶段 1 只建立目录，不写具体 provider 实现。
+LLM provider 适配层导出。
 """
 
+from src.wanwan_client.services.llm.providers.openai_compatible_llm import (
+    OpenAICompatibleLlmProvider,
+)
+
+__all__ = ["OpenAICompatibleLlmProvider"]

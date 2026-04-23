@@ -12,7 +12,6 @@ from src.wanwan_client.shared.schemas.app_settings import (
 )
 from src.wanwan_client.shared.schemas.provider_config import (
     ProviderConfig,
-    ProviderEndpointConfig,
     ProviderModelConfig,
 )
 
@@ -20,7 +19,6 @@ __all__ = [
     "AppSettings",
     "DesktopInteractionSettings",
     "ProviderConfig",
-    "ProviderEndpointConfig",
     "ProviderModelConfig",
     "RuntimeProfile",
     "ServiceSettingsGroup",

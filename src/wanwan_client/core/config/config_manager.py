@@ -1,6 +1,5 @@
 """
 配置管理骨架。
-
 阶段 2 目标：
 1. 承接持久化设置对象。
 2. 负责构建运行时生效配置对象。
@@ -18,7 +17,6 @@ from src.wanwan_client.shared.schemas import AppSettings
 class ConfigManager:
     """
     配置管理器骨架。
-
     设计约束：
     - `infrastructure.settings` 负责设置读写入口
     - `core.config` 负责把设置装配成运行时可消费对象
@@ -31,7 +29,6 @@ class ConfigManager:
     def load_persisted_settings(self) -> AppSettings:
         """
         读取当前已保存设置。
-
         当前阶段只返回结构化对象，不接真实 provider。
         """
         return self.repository.load()
@@ -39,7 +36,6 @@ class ConfigManager:
     def save_settings(self, settings: AppSettings) -> None:
         """
         保存设置对象。
-
         当前阶段只保留保存入口，不扩展校验和迁移逻辑。
         """
         self.repository.save(settings)
@@ -57,13 +53,22 @@ class ConfigManager:
         """
         return self.build_runtime_config()
 
+    def has_profile(self, profile_id: str, settings: Optional[AppSettings] = None) -> bool:
+        """
+        判断给定 profile 是否存在于当前设置中。
+        """
+        persisted_settings = settings or self.load_persisted_settings()
+        return any(profile.profile_id == profile_id for profile in persisted_settings.profiles)
+
     def with_profile(self, profile_id: str, settings: Optional[AppSettings] = None) -> AppSettings:
         """
         返回切换激活配置档后的新设置对象。
-
         当前阶段先保留对象层入口，不直接做 UI 和业务联动。
         """
         persisted_settings = settings or self.load_persisted_settings()
+        if not self.has_profile(profile_id=profile_id, settings=persisted_settings):
+            raise ValueError(f"Unknown profile_id: {profile_id}")
+
         updated_settings = replace(persisted_settings, active_profile_id=profile_id)
         return updated_settings.ensure_minimum()
 
