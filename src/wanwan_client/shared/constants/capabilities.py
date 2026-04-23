@@ -1,0 +1,25 @@
+"""
+服务能力标签常量。
+
+这些常量与内部接口规范中的 `meta.capabilities` 建议值保持一致，
+用于配置模型声明，不用于真实调用逻辑。
+"""
+
+CAPABILITY_CHAT = "chat"
+CAPABILITY_VISION = "vision"
+CAPABILITY_REASONING = "reasoning"
+CAPABILITY_TOOLS = "tools"
+CAPABILITY_AUDIO_IN = "audio_in"
+CAPABILITY_AUDIO_OUT = "audio_out"
+CAPABILITY_VOICE_CONVERT = "voice_convert"
+
+ALL_CAPABILITIES = (
+    CAPABILITY_CHAT,
+    CAPABILITY_VISION,
+    CAPABILITY_REASONING,
+    CAPABILITY_TOOLS,
+    CAPABILITY_AUDIO_IN,
+    CAPABILITY_AUDIO_OUT,
+    CAPABILITY_VOICE_CONVERT,
+)
+

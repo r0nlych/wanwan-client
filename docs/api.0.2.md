@@ -1,14 +1,14 @@
-# wanwan_client 内部接口规范 v0.2
+# wanwan\_client 内部接口规范 v0.2
 
-> 更新时间：2026-04-20  
-> 文档类型：内部接口规范  
-> 适用范围：wanwan_client 语音链路内部阶段传输、前后端核心接口约定、后端内部模块结果对象
+> 更新时间：2026-04-20\
+> 文档类型：内部接口规范\
+> 适用范围：wanwan\_client 语音链路内部阶段传输、前后端核心接口约定、后端内部模块结果对象
 
----
+***
 
 # 1. 文档目标
 
-本文档用于统一 wanwan_client 整体语音链路的接口格式与阶段消息格式。
+本文档用于统一 wanwan\_client 整体语音链路的接口格式与阶段消息格式。
 
 当前链路为：
 
@@ -22,10 +22,10 @@
 4. 每个阶段的成功响应格式
 5. 每个阶段的失败响应格式
 6. 文件保存位置
-7. 时间戳与 trace_id 规范
+7. 时间戳与 trace\_id 规范
 8. 内部统一格式与外部厂商 API 的关系
 
----
+***
 
 # 2. 总体设计原则
 
@@ -50,13 +50,13 @@
 - 不要求外部厂商原生 API 与本文档一致
 - 外部服务差异通过适配层处理
 
----
+***
 
-## 2.2 全链路统一使用 trace_id
+## 2.2 全链路统一使用 trace\_id
 
 一次完整语音请求，从录音开始到最终播放结束，全程使用同一个 `trace_id`。
 
-### trace_id 生成规则
+### trace\_id 生成规则
 
 建议格式：
 
@@ -66,16 +66,16 @@
 
 `trace_1713578123456`
 
-### trace_id 的作用
+### trace\_id 的作用
 
 - 串联整条语音链路
 - 标识一次独立请求
 - 命名中间文件
 - 对齐日志和错误定位
 
----
+***
 
-## 2.3 session_id 用于标识会话
+## 2.3 session\_id 用于标识会话
 
 `session_id` 用于标识当前聊天会话。
 
@@ -85,7 +85,7 @@
 
 当前阶段可以先简单实现，后期再升级为真实会话 ID。
 
----
+***
 
 ## 2.4 timestamp 为当前阶段消息生成时间
 
@@ -103,7 +103,7 @@
 - 辅助排查耗时
 - 为后续更复杂状态流转预留基础字段
 
----
+***
 
 # 3. 请求分类
 
@@ -123,7 +123,7 @@
 - 通常使用 `multipart/form-data`
 - 包含浏览器产生的 Blob / File
 
----
+***
 
 ## 3.2 第二类：后端内部处理类请求
 
@@ -142,7 +142,7 @@
 - 可以是函数调用、模块调用、服务调用
 - 推荐统一使用本文档定义的阶段消息格式
 
----
+***
 
 ## 3.3 第三类：前端输出类请求 / 返回类请求
 
@@ -157,7 +157,7 @@
 - 负责向前端暴露可播放音频
 - 负责生成音频 URL 或资源访问地址
 
----
+***
 
 # 4. 统一外层消息格式
 
@@ -176,49 +176,58 @@
 }
 ```
 
----
+***
 
 # 5. 外层字段定义
 
-## 5.1 trace_id
+## 5.1 trace\_id
 
 ### 含义
+
 全链路唯一标识。
 
 ### 必填
+
 是
 
 ### 示例
+
 ```json
 "trace_id": "trace_1713578123456"
 ```
 
----
+***
 
-## 5.2 session_id
+## 5.2 session\_id
 
 ### 含义
+
 当前会话标识。
 
 ### 必填
+
 是
 
 ### 示例
+
 ```json
 "session_id": "session_001"
 ```
 
----
+***
 
 ## 5.3 step
 
 ### 含义
+
 当前阶段名称。
 
 ### 必填
+
 是
 
 ### 固定枚举
+
 - `record_upload`
 - `stt`
 - `llm`
@@ -227,76 +236,92 @@
 - `playback`
 
 ### 示例
+
 ```json
 "step": "tts"
 ```
 
----
+***
 
 ## 5.4 status
 
 ### 含义
+
 当前阶段执行状态。
 
 ### 必填
+
 是
 
 ### 固定枚举
+
 - `success`
 - `failed`
 
 ### 示例
+
 ```json
 "status": "success"
 ```
 
----
+***
 
 ## 5.5 timestamp
 
 ### 含义
+
 当前阶段结果生成时间。
 
 ### 必填
+
 是
 
 ### 格式
+
 毫秒时间戳
 
 ### 示例
+
 ```json
 "timestamp": 1713578125600
 ```
 
----
+***
 
 ## 5.6 payload
 
 ### 含义
+
 当前阶段核心业务数据。
 
 ### 必填
+
 是
 
 ### 规则
+
 - 成功时必须返回业务数据对象
 - 失败时通常返回空对象 `{}`
 
----
+***
 
 ## 5.7 error
 
 ### 含义
+
 错误对象。
 
 ### 必填
+
 是
 
 ### 规则
+
 - 成功时：`null`
 - 失败时：必须为错误对象
 
 ### 统一错误对象格式
+
 ```json
 {
   "code": "ERROR_CODE",
@@ -304,29 +329,33 @@
 }
 ```
 
----
+***
 
 ## 5.8 meta
 
 ### 含义
+
 附加信息对象。
 
 ### 必填
+
 是
 
 ### 可包含内容
+
 - provider
 - model
 - voice
 - format
 - source
-- duration_ms
+- duration\_ms
 - debug 信息
 
 ### 规则
+
 没有附加信息时返回 `{}`
 
----
+***
 
 # 6. 统一响应格式
 
@@ -349,7 +378,7 @@
 }
 ```
 
----
+***
 
 ## 6.2 失败响应格式
 
@@ -369,7 +398,7 @@
 }
 ```
 
----
+***
 
 # 7. 文件保存规范
 
@@ -389,7 +418,7 @@
 
 `data/temp/trace_1713578123456.webm`
 
----
+***
 
 ## 7.2 TTS 输出文件保存位置
 
@@ -405,7 +434,7 @@
 
 `data/tts/trace_1713578123456.wav`
 
----
+***
 
 ## 7.3 RVC 输出文件保存位置
 
@@ -421,13 +450,13 @@
 
 `data/rvc/trace_1713578123456.wav`
 
----
+***
 
 ## 7.4 目录要求
 
 如果目录不存在，后端必须自动创建。
 
----
+***
 
 ## 7.5 文件清理策略
 
@@ -440,20 +469,20 @@
 
 <!-- 更改日期：2026-04-20 -->
 
----
+***
 
 # 8. 阶段接口规范总表
 
-| 阶段 | step | 请求类型 | 输入核心内容 | 成功输出核心内容 | 文件输出 |
-|---|---|---|---|---|---|
-| 录音上传保存 | `record_upload` | 前端上传类请求 | `audio` Blob、`trace_id`、`session_id` | `audio_path`、`format` | `data/temp/{trace_id}.webm` |
-| 语音转文字 | `stt` | 后端内部处理类请求 | `input_audio_path` | `text`、`language` | 无 |
-| 大模型回复 | `llm` | 后端内部处理类请求 | `user_text`、`history`、`system_prompt` | `reply_text` | 无 |
-| 文字转语音 | `tts` | 后端内部处理类请求 | `input_text` | `output_audio_path`、`format` | `data/tts/{trace_id}.wav` |
-| 语音变声 | `rvc` | 后端内部处理类请求 | `input_audio_path` | `output_audio_path`、`format` | `data/rvc/{trace_id}.wav` |
-| 播放输出 | `playback` | 前端输出类请求 / 返回类请求 | `final_audio_path` | `audio_url` | 无 |
+| 阶段     | step            | 请求类型            | 输入核心内容                                | 成功输出核心内容                     | 文件输出                        |
+| ------ | --------------- | --------------- | ------------------------------------- | ---------------------------- | --------------------------- |
+| 录音上传保存 | `record_upload` | 前端上传类请求         | `audio` Blob、`trace_id`、`session_id`  | `audio_path`、`format`        | `data/temp/{trace_id}.webm` |
+| 语音转文字  | `stt`           | 后端内部处理类请求       | `input_audio_path`                    | `text`、`language`            | 无                           |
+| 大模型回复  | `llm`           | 后端内部处理类请求       | `user_text`、`history`、`system_prompt` | `reply_text`                 | 无                           |
+| 文字转语音  | `tts`           | 后端内部处理类请求       | `input_text`                          | `output_audio_path`、`format` | `data/tts/{trace_id}.wav`   |
+| 语音变声   | `rvc`           | 后端内部处理类请求       | `input_audio_path`                    | `output_audio_path`、`format` | `data/rvc/{trace_id}.wav`   |
+| 播放输出   | `playback`      | 前端输出类请求 / 返回类请求 | `final_audio_path`                    | `audio_url`                  | 无                           |
 
----
+***
 
 # 9. 外部厂商适配原则
 
@@ -466,7 +495,7 @@
 - 调用外部服务前，应由适配层将内部统一格式转换为对应厂商格式
 - 外部服务返回结果后，应转换回本文档定义的统一格式
 
----
+***
 
 # 10. 当前版本范围
 
@@ -475,7 +504,7 @@
 - 统一外层字段
 - 统一响应格式
 - 统一错误对象格式
-- 统一 trace_id 与文件命名规则
+- 统一 trace\_id 与文件命名规则
 - 统一各阶段输入输出核心结构
 
 ## 10.2 当前版本不处理的内容
@@ -486,11 +515,12 @@
 - 并发任务调度
 - 数据库存储式链路编排
 
----
+***
 
 # 11. 版本说明
 
 ## v0.2
+
 当前版本定位：
 
 - 优先服务当前项目落地
@@ -498,19 +528,19 @@
 - 保证“能跑、能查、能扩展”
 - 先不做过重设计
 
----
+***
 
 # 附录：阶段接口明细
 
-# wanwan_client 内部接口规范：阶段明细 v0.2
+# wanwan\_client 内部接口规范：阶段明细 v0.2
 
-> 更新时间：2026-04-20  
-> 文档类型：阶段接口明细  
+> 更新时间：2026-04-20\
+> 文档类型：阶段接口明细\
 > 关联文档：`wanwan_client_internal_api_spec.md`
 
----
+***
 
-# 1. record_upload 阶段
+# 1. record\_upload 阶段
 
 ## 1.1 阶段作用
 
@@ -528,11 +558,11 @@
 
 ## 1.4 请求字段
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| audio | File / Blob | 是 | 浏览器录音文件，字段名固定为 `audio` |
-| trace_id | string | 是 | 全链路唯一标识 |
-| session_id | string | 是 | 当前会话标识 |
+| 字段名         | 类型          | 必填 | 说明                     |
+| ----------- | ----------- | -: | ---------------------- |
+| audio       | File / Blob |  是 | 浏览器录音文件，字段名固定为 `audio` |
+| trace\_id   | string      |  是 | 全链路唯一标识                |
+| session\_id | string      |  是 | 当前会话标识                 |
 
 ## 1.5 文件保存位置
 
@@ -578,7 +608,7 @@
 }
 ```
 
----
+***
 
 # 2. stt 阶段
 
@@ -653,7 +683,7 @@
 }
 ```
 
----
+***
 
 # 3. llm 阶段
 
@@ -734,7 +764,7 @@
 }
 ```
 
----
+***
 
 # 4. tts 阶段
 
@@ -814,7 +844,7 @@
 }
 ```
 
----
+***
 
 # 5. rvc 阶段
 
@@ -894,7 +924,7 @@
 }
 ```
 
----
+***
 
 # 6. playback 阶段
 
@@ -969,28 +999,28 @@
 
 <!-- 更改日期：2026-04-20 -->
 
----
+***
 
 # 附录：错误码表
 
-| 错误码 | 阶段 | 说明 |
-|---|---|---|
-| `RECORD_UPLOAD_NO_AUDIO` | `record_upload` | 未检测到 audio 文件 |
-| `RECORD_UPLOAD_SAVE_FAILED` | `record_upload` | 录音文件保存失败 |
-| `STT_RECOGNIZE_FAILED` | `stt` | STT 识别失败 |
-| `LLM_GENERATE_FAILED` | `llm` | LLM 回复生成失败 |
-| `TTS_GENERATE_FAILED` | `tts` | TTS 音频生成失败 |
-| `RVC_CONVERT_FAILED` | `rvc` | RVC 变声失败 |
-| `PLAYBACK_URL_GENERATE_FAILED` | `playback` | 播放地址生成失败 |
-| `PLAYBACK_FILE_NOT_FOUND` | `playback` | 音频文件不存在 |
+| 错误码                            | 阶段              | 说明            |
+| ------------------------------ | --------------- | ------------- |
+| `RECORD_UPLOAD_NO_AUDIO`       | `record_upload` | 未检测到 audio 文件 |
+| `RECORD_UPLOAD_SAVE_FAILED`    | `record_upload` | 录音文件保存失败      |
+| `STT_RECOGNIZE_FAILED`         | `stt`           | STT 识别失败      |
+| `LLM_GENERATE_FAILED`          | `llm`           | LLM 回复生成失败    |
+| `TTS_GENERATE_FAILED`          | `tts`           | TTS 音频生成失败    |
+| `RVC_CONVERT_FAILED`           | `rvc`           | RVC 变声失败      |
+| `PLAYBACK_URL_GENERATE_FAILED` | `playback`      | 播放地址生成失败      |
+| `PLAYBACK_FILE_NOT_FOUND`      | `playback`      | 音频文件不存在       |
 
 <!-- 更改日期：2026-04-20 -->
 
----
+***
 
 # 附录：前端ID生成示例
 
-## trace_id 生成示例
+## trace\_id 生成示例
 
 ```javascript
 function generateTraceId() {
@@ -998,7 +1028,7 @@ function generateTraceId() {
 }
 ```
 
-## session_id 生成示例（临时实现）
+## session\_id 生成示例（临时实现）
 
 ```javascript
 function generateSessionId() {
@@ -1009,7 +1039,7 @@ function generateSessionId() {
 
 <!-- 更改日期：2026-04-20 -->
 
----
+***
 
 # 附录：安全性说明
 

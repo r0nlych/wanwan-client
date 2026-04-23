@@ -1,0 +1,36 @@
+{
+  "schema_version": "settings.v0.1",
+  "active_profile_id": "default",
+  "profiles": [
+    {
+      "profile_id": "default",
+      "display_name": "默认配置",
+      "llm": {
+        "enabled": true,
+        "default_provider_id": "",
+        "providers": []
+      },
+      "tts": {
+        "enabled": true,
+        "default_provider_id": "",
+        "providers": []
+      },
+      "stt": {
+        "enabled": true,
+        "default_provider_id": "",
+        "providers": []
+      },
+      "rvc": {
+        "enabled": true,
+        "default_provider_id": "",
+        "providers": []
+      },
+      "desktop": {
+        "auto_play_response": true,
+        "enable_text_input": true,
+        "enable_push_to_talk": false,
+        "volume": 1.0
+      }
+    }
+  ]
+}
