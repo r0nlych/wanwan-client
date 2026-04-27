@@ -115,8 +115,9 @@
               "speed": "1.0",
               "sample_rate": "24000",
               "volume": "1.0",
-              "resource_id": "volc.service_type.10029",
-              "auth_mode": "x_api_key",
+              "resource_id": "seed-tts-2.0",
+              "auth_mode": "legacy_app_access",
+              "app_id": "5928591374",
               "emotion": "",
               "custom": {
                 "notes": ""

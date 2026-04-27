@@ -74,7 +74,6 @@ class DoubaoTtsProvider:
             volume=volume,
             language=language,
             emotion=emotion,
-            api_key=api_key,
         )
         headers = self._build_headers(request=request, api_key=api_key)
         response = requests.post(
@@ -131,59 +130,46 @@ class DoubaoTtsProvider:
         volume: float,
         language: str | None,
         emotion: str | None,
-        api_key: str,
     ) -> dict[str, Any]:
-        request_id = request.options.get("request_id") or request.trace_id or str(uuid.uuid4())
-        app_id = self._resolve_optional_string(
-            request.provider_config.extra.get("app_id"),
-            request.options.get("app_id"),
-        )
         uid = self._resolve_optional_string(
             request.options.get("uid"),
-            app_id,
             request.session_id,
-            api_key,
+            request.trace_id,
+            "wanwan-client",
         )
-        cluster = self._resolve_string(
-            request.provider_config.extra.get("cluster"),
-            default="volcano_tts",
-        )
-        audio_config: dict[str, Any] = {
-            "voice_type": voice_type,
-            "encoding": response_format,
-            "rate": sample_rate,
-            "speed_ratio": speed,
-            "volume_ratio": volume,
+        audio_params: dict[str, Any] = {
+            "format": self._normalize_encoding(response_format),
+            "sample_rate": sample_rate,
         }
-        if language:
-            audio_config["language"] = language
         if emotion:
-            audio_config["emotion"] = emotion
+            audio_params["emotion"] = emotion
+        if speed != 1.0:
+            audio_params["speech_rate"] = self._to_rate_value(speed)
+        if volume != 1.0:
+            audio_params["loudness_rate"] = self._to_rate_value(volume)
+
+        model_name = self._resolve_optional_string(
+            request.model_config.extra.get("model"),
+            request.provider_config.extra.get("model"),
+        )
+        req_params: dict[str, Any] = {
+            "text": request.text,
+            "speaker": voice_type,
+            "audio_params": audio_params,
+        }
+        additions: dict[str, Any] = {}
+        if language:
+            additions["explicit_language"] = self._normalize_language(language)
+        if additions:
+            req_params["additions"] = json.dumps(additions, ensure_ascii=False)
+        if model_name:
+            req_params["model"] = model_name
 
         return {
-            "app": {
-                "appid": app_id or "",
-                "token": api_key,
-                "cluster": cluster,
-            },
             "user": {
                 "uid": uid,
             },
-            "audio": audio_config,
-            "request": {
-                "reqid": request_id,
-                "text": request.text,
-                "text_type": self._resolve_string(
-                    request.options.get("text_type"),
-                    request.provider_config.extra.get("text_type"),
-                    default="plain",
-                ),
-                "operation": "submit",
-                "with_timestamp": self._resolve_optional_int(
-                    request.options.get("with_timestamp"),
-                    request.provider_config.extra.get("with_timestamp"),
-                ),
-            },
+            "req_params": req_params,
         }
 
     def _build_headers(self, *, request: TtsProviderRequest, api_key: str) -> dict[str, str]:
@@ -215,7 +201,7 @@ class DoubaoTtsProvider:
             return headers
 
         if auth_mode == "bearer_token":
-            headers["Authorization"] = f"Bearer;{api_key}"
+            headers["Authorization"] = f"Bearer {api_key}"
             app_id = self._resolve_optional_string(provider_config.extra.get("app_id"))
             if app_id:
                 headers["X-Api-App-Id"] = app_id
@@ -300,7 +286,7 @@ class DoubaoTtsProvider:
             }
         )
         code = self._safe_int(payload.get("code"))
-        if code not in (None, 0, 3000):
+        if code not in (None, 0, 3000, 20000000):
             raise self._build_provider_error(payload)
 
         data = payload.get("data")
@@ -319,6 +305,10 @@ class DoubaoTtsProvider:
         additions = payload.get("addition") or payload.get("additions") or {}
         if isinstance(additions, dict):
             latest_meta["audio_duration_ms"] = additions.get("duration") or latest_meta.get("audio_duration_ms")
+        status_code = self._safe_int(payload.get("status_code"))
+        if status_code == 20000000:
+            latest_meta["provider_status_code"] = status_code
+            latest_meta["provider_message"] = payload.get("message")
 
     def _build_provider_error(
         self,
@@ -440,7 +430,21 @@ class DoubaoTtsProvider:
             "wav": "audio/wav",
             "mp3": "audio/mpeg",
             "ogg": "audio/ogg",
+            "ogg_opus": "audio/ogg",
             "opus": "audio/ogg",
             "pcm": "audio/pcm",
         }
         return mapping.get(response_format.lower(), "application/octet-stream")
+
+    def _normalize_encoding(self, response_format: str) -> str:
+        normalized = response_format.lower().strip()
+        if normalized == "ogg":
+            return "ogg_opus"
+        return normalized
+
+    def _normalize_language(self, language: str) -> str:
+        normalized = language.strip().lower()
+        mapping = {
+            "zh": "zh-cn",
+        }
+        return mapping.get(normalized, normalized)
