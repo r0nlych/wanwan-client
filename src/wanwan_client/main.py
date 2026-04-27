@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.wanwan_client.core.app import RuntimeApp
 from src.wanwan_client.core.pipeline.text_audio_pipeline import TextAudioPipeline
+from src.wanwan_client.core.pipeline.voice_audio_pipeline import VoiceAudioPipeline
 from src.wanwan_client.desktop.playback import LocalAudioPlayer
 from src.wanwan_client.services.llm import LlmService
 from src.wanwan_client.services.stt import SttService
@@ -110,6 +111,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate audio only and skip local playback.",
     )
     run_tts_text_parser.set_defaults(play_audio=True)
+
+    run_voice_chain_parser = subparsers.add_parser(
+        "run-voice-chain",
+        help="Run the minimal real audio -> STT -> LLM -> TTS -> local playback pipeline.",
+    )
+    run_voice_chain_parser.add_argument("audio_path", help="Local audio file path.")
+    run_voice_chain_parser.add_argument(
+        "--session-id",
+        dest="session_id",
+        help="Optional session id for the current run.",
+    )
     return parser
 
 
@@ -117,6 +129,8 @@ def print_json(data: object) -> None:
     """
     统一输出调试结果。
     """
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
 
@@ -222,6 +236,15 @@ def main():
             if tts_result["status"] != "success" or (
                 args.play_audio and result.get("playback", {}).get("status") != "success"
             ):
+                raise SystemExit(1)
+            return
+
+        if args.command == "run-voice-chain":
+            state = app.load_state()
+            pipeline = VoiceAudioPipeline(runtime_config=state.runtime_config)
+            result = pipeline.run(audio_path=args.audio_path, session_id=args.session_id)
+            print_json(result)
+            if result["status"] != "success":
                 raise SystemExit(1)
             return
 
