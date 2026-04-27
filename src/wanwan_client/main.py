@@ -6,7 +6,7 @@ from pathlib import Path
 from src.wanwan_client.core.app import RuntimeApp
 from src.wanwan_client.core.pipeline.text_audio_pipeline import TextAudioPipeline
 from src.wanwan_client.core.pipeline.voice_audio_pipeline import VoiceAudioPipeline
-from src.wanwan_client.desktop.app import launch_voice_chain_window
+from src.wanwan_client.desktop.app import launch_pet_window, launch_voice_chain_window
 from src.wanwan_client.desktop.playback import LocalAudioPlayer
 from src.wanwan_client.services.llm import LlmService
 from src.wanwan_client.services.stt import SttService
@@ -126,6 +126,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "run-desktop-voice-window",
         help="Launch the minimal local tkinter window for the voice chain.",
+    )
+    subparsers.add_parser(
+        "run-desktop-pet",
+        help="Launch the minimal local tkinter desktop pet shell.",
     )
     return parser
 
@@ -255,6 +259,10 @@ def main():
 
         if args.command == "run-desktop-voice-window":
             launch_voice_chain_window()
+            return
+
+        if args.command == "run-desktop-pet":
+            launch_pet_window()
             return
 
         parser.error(f"Unknown command: {args.command}")
