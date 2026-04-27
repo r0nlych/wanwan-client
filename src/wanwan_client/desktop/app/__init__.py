@@ -1,6 +1,5 @@
-"""
-桌宠应用入口骨架。
+"""Desktop application entry helpers."""
 
-阶段 1 只建立目录落点，不实现具体 UI 框架。
-"""
+from src.wanwan_client.desktop.app.voice_chain_window import launch_voice_chain_window
 
+__all__ = ["launch_voice_chain_window"]
