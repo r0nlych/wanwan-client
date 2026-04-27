@@ -5,8 +5,7 @@ from pathlib import Path
 
 from src.wanwan_client.core.app import RuntimeApp
 from src.wanwan_client.core.pipeline.text_audio_pipeline import TextAudioPipeline
-from src.wanwan_client.core.pipeline.voice_audio_pipeline import VoiceAudioPipeline
-from src.wanwan_client.desktop.app import launch_pet_window, launch_voice_chain_window
+from src.wanwan_client.desktop.controllers.voice_chain_controller import VoiceChainController
 from src.wanwan_client.desktop.playback import LocalAudioPlayer
 from src.wanwan_client.services.llm import LlmService
 from src.wanwan_client.services.stt import SttService
@@ -123,13 +122,17 @@ def build_parser() -> argparse.ArgumentParser:
         dest="session_id",
         help="Optional session id for the current run.",
     )
-    subparsers.add_parser(
-        "run-desktop-voice-window",
-        help="Launch the minimal local tkinter window for the voice chain.",
+    run_voice_chain_parser.add_argument(
+        "--json-only",
+        action="store_true",
+        default=False,
+        help="Suppress all non-JSON stdout output. Debug logs still written to file.",
     )
-    subparsers.add_parser(
-        "run-desktop-pet",
-        help="Launch the minimal local tkinter desktop pet shell.",
+    run_voice_chain_parser.add_argument(
+        "--no-play",
+        action="store_true",
+        default=False,
+        help="Skip local audio playback. C# frontend will play TTS output.",
     )
     return parser
 
@@ -249,20 +252,76 @@ def main():
             return
 
         if args.command == "run-voice-chain":
-            state = app.load_state()
-            pipeline = VoiceAudioPipeline(runtime_config=state.runtime_config)
-            result = pipeline.run(audio_path=args.audio_path, session_id=args.session_id)
+            from src.wanwan_client.infrastructure.logging.debug_logger import (
+                EVENT_CONVERSATION_SAVE_RESULT_V2,
+                EVENT_VOICE_CHAIN_CLI_START,
+                get_debug_logger,
+            )
+
+            debug_log = get_debug_logger()
+            debug_log.info(
+                EVENT_VOICE_CHAIN_CLI_START,
+                "CLI 启动语音链路",
+                audio_path=args.audio_path,
+                session_id=args.session_id,
+                json_only=args.json_only,
+                no_play=args.no_play,
+            )
+
+            controller = VoiceChainController(runtime_app=app)
+            result = controller.run(
+                audio_path=args.audio_path,
+                session_id=args.session_id,
+                skip_playback=args.no_play,
+            )
+
+            trace_id = result.get("trace_id", "")
+            session_id = result.get("session_id", "")
+            status = result.get("status", "unknown")
+            final = result.get("final") or {}
+            failed_stage = final.get("failed_stage") if isinstance(final, dict) else None
+            stt_text = (final.get("stt_text") or "") if isinstance(final, dict) else ""
+            reply_text = (final.get("reply_text") or "") if isinstance(final, dict) else ""
+            tts_audio_path = (final.get("tts_audio_path") or "") if isinstance(final, dict) else ""
+            conversation_save = result.get("conversation_save") or {}
+            conv_saved = conversation_save.get("saved") if isinstance(conversation_save, dict) else False
+            conv_path = conversation_save.get("path") if isinstance(conversation_save, dict) else ""
+
+            if isinstance(failed_stage, dict) and failed_stage:
+                debug_log.error(
+                    EVENT_VOICE_CHAIN_CLI_START,
+                    "语音链路失败",
+                    trace_id=trace_id,
+                    session_id=session_id,
+                    status=status,
+                    step=failed_stage.get("step", ""),
+                    error_code=((failed_stage.get("error") or {}).get("code") or ""),
+                    error_message=((failed_stage.get("error") or {}).get("message") or ""),
+                )
+            else:
+                debug_log.info(
+                    EVENT_VOICE_CHAIN_CLI_START,
+                    "语音链路结束",
+                    trace_id=trace_id,
+                    session_id=session_id,
+                    status=status,
+                    stt_text_non_empty=bool(stt_text),
+                    reply_text_non_empty=bool(reply_text),
+                    tts_audio_path=tts_audio_path,
+                )
+
+            debug_log.info(
+                EVENT_CONVERSATION_SAVE_RESULT_V2,
+                "会话保存结果",
+                trace_id=trace_id,
+                session_id=session_id,
+                saved=conv_saved,
+                path=conv_path,
+            )
+
             print_json(result)
             if result["status"] != "success":
                 raise SystemExit(1)
-            return
-
-        if args.command == "run-desktop-voice-window":
-            launch_voice_chain_window()
-            return
-
-        if args.command == "run-desktop-pet":
-            launch_pet_window()
             return
 
         parser.error(f"Unknown command: {args.command}")

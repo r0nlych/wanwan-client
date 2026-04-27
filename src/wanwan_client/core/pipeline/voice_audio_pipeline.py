@@ -48,7 +48,7 @@ class VoiceAudioPipeline:
         self.tts_provider_registry = tts_provider_registry or TtsProviderRegistry()
         self.audio_player = audio_player or LocalAudioPlayer()
 
-    def run(self, audio_path: str | Path, session_id: str | None = None) -> dict[str, Any]:
+    def run(self, audio_path: str | Path, session_id: str | None = None, skip_playback: bool = False) -> dict[str, Any]:
         trace_id = self._build_trace_id()
         resolved_session_id = session_id or self._build_session_id()
         stages: list[dict[str, Any]] = []
@@ -268,6 +268,34 @@ class VoiceAudioPipeline:
             )
             return self._build_pipeline_result(trace_id, resolved_session_id, stages)
 
+        if skip_playback:
+            stages.append(
+                self._build_stage_result(
+                    trace_id=trace_id,
+                    session_id=resolved_session_id,
+                    step="playback",
+                    status="skipped",
+                    payload={
+                        "input": {},
+                        "output": {"skipped": True, "reason": "--no-play flag"},
+                        "refs": {
+                            "audio_ref": tts_result.audio_ref,
+                        },
+                        "options": {"autoplay": False},
+                    },
+                    meta={
+                        "provider": "none",
+                        "model": None,
+                        "capabilities": [],
+                        "content_type": "audio/wav",
+                        "protocol_version": self.PROTOCOL_VERSION,
+                        "adapter_version": "phase6.playback.skipped.v1",
+                        "duration_ms": 0,
+                    },
+                )
+            )
+            return self._build_pipeline_result(trace_id, resolved_session_id, stages)
+
         playback_started = perf_counter()
         try:
             playback_result = self.audio_player.play(tts_result.audio_ref["value"])
@@ -324,7 +352,11 @@ class VoiceAudioPipeline:
         return self._build_pipeline_result(trace_id, resolved_session_id, stages)
 
     def _build_pipeline_result(self, trace_id: str, session_id: str, stages: list[dict[str, Any]]) -> dict[str, Any]:
-        final_status = "success" if stages and stages[-1]["status"] == "success" else "failed"
+        final_status = "success"
+        for stage in stages:
+            if stage["status"] == "failed":
+                final_status = "failed"
+                break
         stt_text = None
         reply_text = None
         audio_ref = None

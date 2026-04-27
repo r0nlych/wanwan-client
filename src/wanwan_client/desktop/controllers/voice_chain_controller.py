@@ -11,6 +11,7 @@ from typing import Any
 
 from src.wanwan_client.core.app import RuntimeApp
 from src.wanwan_client.core.pipeline import VoiceAudioPipeline
+from src.wanwan_client.services.storage import ConversationStore
 
 
 class VoiceChainController:
@@ -21,21 +22,19 @@ class VoiceChainController:
     def __init__(self, runtime_app: RuntimeApp | None = None) -> None:
         self.runtime_app = runtime_app or RuntimeApp()
 
-    def run(self, audio_path: str, session_id: str | None = None) -> dict[str, Any]:
+    def run(self, audio_path: str, session_id: str | None = None, skip_playback: bool = False) -> dict[str, Any]:
         normalized_audio_path = str(audio_path).strip()
         resolved_session_id = session_id or self._build_session_id()
 
         if not normalized_audio_path:
-            return self._build_validation_failure(
+            result = self._build_validation_failure(
                 session_id=resolved_session_id,
                 error_code="VOICE_CHAIN_AUDIO_PATH_REQUIRED",
                 error_message="audio_path is required",
                 details={},
             )
-
-        path = Path(normalized_audio_path)
-        if not path.exists():
-            return self._build_validation_failure(
+        elif not Path(normalized_audio_path).exists():
+            result = self._build_validation_failure(
                 session_id=resolved_session_id,
                 error_code="VOICE_CHAIN_AUDIO_PATH_NOT_FOUND",
                 error_message=f"Audio path not found: {normalized_audio_path}",
@@ -43,12 +42,15 @@ class VoiceChainController:
                     "audio_path": normalized_audio_path,
                 },
             )
+        else:
+            state = self.runtime_app.load_state()
+            pipeline = VoiceAudioPipeline(runtime_config=state.runtime_config)
+            result = pipeline.run(audio_path=normalized_audio_path, session_id=resolved_session_id, skip_playback=skip_playback)
+            self._attach_controller_meta(result)
+            self._attach_final_audio_path(result)
 
-        state = self.runtime_app.load_state()
-        pipeline = VoiceAudioPipeline(runtime_config=state.runtime_config)
-        result = pipeline.run(audio_path=normalized_audio_path, session_id=resolved_session_id)
-        self._attach_controller_meta(result)
-        self._attach_final_audio_path(result)
+        save_meta = ConversationStore.save(result)
+        result["conversation_save"] = save_meta
         return result
 
     def _build_validation_failure(

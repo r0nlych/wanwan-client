@@ -219,7 +219,11 @@ class TextAudioPipeline:
         session_id: str,
         stages: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        final_status = "success" if stages and stages[-1]["status"] == "success" else "failed"
+        final_status = "success"
+        for s in stages:
+            if s["status"] == "failed":
+                final_status = "failed"
+                break
         last_successful_reply = None
         last_audio_ref = None
         for stage in stages:
