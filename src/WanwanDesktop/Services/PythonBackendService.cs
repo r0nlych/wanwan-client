@@ -90,28 +90,15 @@ public class PythonBackendService
             {
                 _log.Error("python.result", $"Python 退出码非 0",
                     new() { ["exit_code"] = process.ExitCode, ["stderr"] = stderr });
+            }
+
+            var result = TryParseVoiceChainResult(stdout);
+            if (result == null)
+            {
                 return null;
             }
 
-            VoiceChainResult? result;
-            try
-            {
-                result = JsonSerializer.Deserialize<VoiceChainResult>(stdout);
-                if (result == null)
-                {
-                    _log.Error("python.result", "JSON 解析结果为 null",
-                        new() { ["stdout_length"] = stdout.Length });
-                    return null;
-                }
-            }
-            catch (JsonException ex)
-            {
-                _log.Error("python.result", "JSON 解析失败",
-                    new() { ["error"] = ex.Message, ["stdout_preview"] = stdout.Length > 1000 ? stdout[..1000] : stdout });
-                return null;
-            }
-
-            _log.Info("python.result", "Python 后端返回成功",
+            _log.Info("python.result", process.ExitCode == 0 ? "Python 后端返回成功" : "Python 后端返回结构化失败",
                 new()
                 {
                     ["status"] = result.Status,
@@ -131,4 +118,32 @@ public class PythonBackendService
     }
 
     public string GetProjectRoot() => _projectRoot;
+
+    private VoiceChainResult? TryParseVoiceChainResult(string stdout)
+    {
+        if (string.IsNullOrWhiteSpace(stdout))
+        {
+            _log.Error("python.result", "stdout 为空，无法解析 Python 返回结果");
+            return null;
+        }
+
+        try
+        {
+            var result = JsonSerializer.Deserialize<VoiceChainResult>(stdout);
+            if (result == null)
+            {
+                _log.Error("python.result", "JSON 解析结果为 null",
+                    new() { ["stdout_length"] = stdout.Length });
+                return null;
+            }
+
+            return result;
+        }
+        catch (JsonException ex)
+        {
+            _log.Error("python.result", "JSON 解析失败",
+                new() { ["error"] = ex.Message, ["stdout_preview"] = stdout.Length > 1000 ? stdout[..1000] : stdout });
+            return null;
+        }
+    }
 }

@@ -1,8 +1,10 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using Microsoft.Win32;
 using WanwanDesktop.Models;
@@ -49,7 +51,18 @@ public partial class MainWindow : Window
 
     private void SetResult(string text)
     {
-        Dispatcher.Invoke(() => ResultLabel.Text = text);
+        Dispatcher.Invoke(() =>
+        {
+            ResultLabel.Text = text;
+            ResultLabel.ToolTip = null;
+        });
+    }
+
+    private static string TruncateText(string? text, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text))
+            return "";
+        return text.Length <= maxLength ? text : text[..maxLength] + "...";
     }
 
     // ======================== Recording ========================
@@ -168,7 +181,16 @@ public partial class MainWindow : Window
             if (result == null || result.Status != "success")
             {
                 SetStatus("失败");
-                SetResult("Python 链路失败，请查看日志");
+                var failureMessage = BuildVoiceChainFailureMessage(result);
+                SetResult(failureMessage);
+                _log.Error("voice_chain.failed", "语音链路失败",
+                    new()
+                    {
+                        ["failure"] = failureMessage,
+                        ["trace_id"] = result?.TraceId,
+                        ["step"] = ResolveFailedStep(result),
+                        ["step_display"] = GetStepDisplayName(ResolveFailedStep(result)),
+                    });
                 _isRunning = false;
                 return;
             }
@@ -210,14 +232,31 @@ public partial class MainWindow : Window
                 _log.Warn("voice_chain.no_tts", "语音链路未返回 TTS 路径");
             }
 
-            var display = "";
+            var summary = "";
             if (!string.IsNullOrEmpty(sttText))
-                display += $"识别: {sttText}";
+                summary += $"识别: {TruncateText(sttText, 25)}";
             if (!string.IsNullOrEmpty(replyText))
-                display += (display.Length > 0 ? " | " : "") + $"回复: {replyText}";
-            if (display.Length == 0)
-                display = "完成";
-            SetResult(display);
+                summary += (summary.Length > 0 ? " | " : "") + $"回复: {TruncateText(replyText, 25)}";
+            if (summary.Length == 0)
+                summary = "完成";
+            SetResult(summary);
+
+            if (!string.IsNullOrEmpty(sttText) || !string.IsNullOrEmpty(replyText))
+            {
+                var tooltipText = "";
+                if (!string.IsNullOrEmpty(sttText))
+                    tooltipText += $"识别文本：\n{sttText}";
+                if (!string.IsNullOrEmpty(replyText))
+                    tooltipText += (tooltipText.Length > 0 ? "\n\n" : "") + $"回复文本：\n{replyText}";
+
+                ResultLabel.ToolTip = new TextBlock
+                {
+                    Text = tooltipText,
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxWidth = 320,
+                    FontSize = 13,
+                };
+            }
         }
         catch (Exception ex)
         {
@@ -230,6 +269,135 @@ public partial class MainWindow : Window
         {
             _isRunning = false;
         }
+    }
+
+    private static string BuildVoiceChainFailureMessage(VoiceChainResult? result)
+    {
+        if (result == null)
+            return "Python 后端失败：未返回可解析结果";
+
+        var failedStage = result.Final?.FailedStage;
+        var step = NormalizeStep(failedStage?.Step);
+        var error = failedStage?.Error;
+
+        if (string.IsNullOrEmpty(step) || error == null)
+        {
+            foreach (var stage in result.Stages ?? Enumerable.Empty<VoiceChainStage>())
+            {
+                if (!string.Equals(stage.Status, "failed", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                step = NormalizeStep(stage.Step);
+                error = stage.Error;
+                break;
+            }
+        }
+
+        if (string.IsNullOrEmpty(step))
+            step = NormalizeStep(result.Step);
+
+        var title = BuildFailureTitle(step, error);
+        var detail = FirstNonEmpty(error?.Message, error?.Code, "请查看日志");
+        return $"{title}：{detail}";
+    }
+
+    private static string? ResolveFailedStep(VoiceChainResult? result)
+    {
+        if (result == null)
+            return null;
+
+        var failedStageStep = NormalizeStep(result.Final?.FailedStage?.Step);
+        if (!string.IsNullOrEmpty(failedStageStep))
+            return failedStageStep;
+
+        foreach (var stage in result.Stages ?? Enumerable.Empty<VoiceChainStage>())
+        {
+            if (string.Equals(stage.Status, "failed", StringComparison.OrdinalIgnoreCase))
+                return NormalizeStep(stage.Step);
+        }
+
+        return NormalizeStep(result.Step);
+    }
+
+    private static string BuildFailureTitle(string? step, VoiceChainError? error)
+    {
+        if (IsConfigError(error))
+            return "配置失败";
+
+        return NormalizeStep(step) switch
+        {
+            "stt" => "STT 失败",
+            "llm" => "LLM 失败",
+            "tts" => "TTS 失败",
+            "playback" => "播放失败",
+            "record_upload" or "voice_chain" or "recorder" => "音频输入失败",
+            "config" or "settings" => "配置失败",
+            _ => "Python 后端失败",
+        };
+    }
+
+    private static string GetStepDisplayName(string? step)
+    {
+        return NormalizeStep(step) switch
+        {
+            "stt" => "STT 语音识别",
+            "llm" => "LLM 回复生成",
+            "tts" => "TTS 语音合成",
+            "playback" => "音频播放",
+            "record_upload" or "voice_chain" or "recorder" => "音频输入",
+            "config" or "settings" => "配置读取",
+            _ => "未知阶段",
+        };
+    }
+
+    private static bool IsConfigError(VoiceChainError? error)
+    {
+        var code = error?.Code ?? "";
+        var type = error?.Type ?? "";
+        var message = error?.Message ?? "";
+
+        return ContainsAny(code, "CONFIG", "SETTINGS")
+            || ContainsAny(type, "config")
+            || ContainsAny(
+                message,
+                "config",
+                "settings",
+                "provider not found",
+                "configured provider not found",
+                "model not found",
+                "configured model not found",
+                "missing api key",
+                "api_key",
+                "api key",
+                "api_host",
+                "api_path");
+    }
+
+    private static bool ContainsAny(string value, params string[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (value.Contains(candidate, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static string NormalizeStep(string? step)
+    {
+        return (step ?? "").Trim().ToLowerInvariant();
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim();
+        }
+
+        return "";
     }
 
     // ======================== Settings ========================

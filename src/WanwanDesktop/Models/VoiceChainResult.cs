@@ -50,7 +50,7 @@ public class VoiceChainFinal
     public VoiceChainPlayback? Playback { get; set; }
 
     [JsonPropertyName("failed_stage")]
-    public object? FailedStage { get; set; }
+    public VoiceChainFailedStage? FailedStage { get; set; }
 }
 
 public class VoiceChainPlayback
@@ -81,6 +81,33 @@ public class VoiceChainStage
 
     [JsonPropertyName("timestamp")]
     public string Timestamp { get; set; } = "";
+
+    [JsonPropertyName("error")]
+    public VoiceChainError? Error { get; set; }
+}
+
+public class VoiceChainFailedStage
+{
+    [JsonPropertyName("step")]
+    public string Step { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string? Status { get; set; }
+
+    [JsonPropertyName("error")]
+    public VoiceChainError? Error { get; set; }
+}
+
+public class VoiceChainError
+{
+    [JsonPropertyName("code")]
+    public string? Code { get; set; }
+
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
+
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
 }
 
 public class ConversationSave
