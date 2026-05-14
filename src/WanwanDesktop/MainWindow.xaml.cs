@@ -415,7 +415,7 @@ public partial class MainWindow : Window
                 if (_settingsWindow != null) return;
             }
 
-            _settingsWindow = new SettingsWindow();
+            _settingsWindow = new SettingsWindow(_python, _player);
             _settingsWindow.Closed += (_, _) =>
             {
                 _settingsWindow = null;

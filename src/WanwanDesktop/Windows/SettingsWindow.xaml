@@ -28,6 +28,7 @@
         </ScrollViewer>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="TtsTestButton" Content="测试 TTS" Click="TestTts_Click" Width="80" Margin="0,0,8,0"/>
             <Button Content="保存设置" Click="Save_Click" Width="80" Margin="0,0,8,0"/>
             <Button Content="取消" Click="Cancel_Click" Width="60"/>
         </StackPanel>
