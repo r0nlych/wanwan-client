@@ -36,8 +36,8 @@ public partial class SettingsWindow : Window
     {
         "api_host", "api_path", "api_key", "default_model_id",
         "current_model_id", "resource_id", "auth_mode", "app_id",
-        "voice_type", "language", "response_format", "sample_rate",
-        "speed", "volume"
+        "voice", "voice_type", "language", "response_format", "sample_rate",
+        "speed", "volume", "emotion"
     };
 
     public SettingsWindow()
@@ -195,25 +195,38 @@ public partial class SettingsWindow : Window
             "api_key" => "",
             "default_model_id" => provider.DefaultModelId ?? "",
             "current_model_id" => model?.ModelId ?? provider.DefaultModelId ?? "",
-            "temperature" => provider.Extra?.GetValueOrDefault("temperature")?.ToString() ?? "",
+            "temperature" => ReadModelFirst(model, provider, "temperature"),
             "max_output_tokens" => model?.MaxOutputTokens ?? "",
-            "reasoning_enabled" => model?.Extra?.GetValueOrDefault("reasoning_enabled")?.ToString() ?? "",
-            "system_prompt" => provider.Extra?.GetValueOrDefault("system_prompt")?.ToString() ?? "",
+            "reasoning_enabled" => ReadModelFirst(model, provider, "reasoning_enabled"),
+            "system_prompt" => ReadModelFirst(model, provider, "system_prompt"),
             "resource_id" => provider.Extra?.GetValueOrDefault("resource_id")?.ToString() ?? "",
             "auth_mode" => provider.Extra?.GetValueOrDefault("auth_mode")?.ToString() ?? "",
             "app_id" => provider.Extra?.GetValueOrDefault("app_id")?.ToString() ?? "",
-            "language_hint" => provider.Extra?.GetValueOrDefault("language_hint")?.ToString() ?? "",
-            "response_format" => provider.Extra?.GetValueOrDefault("response_format")?.ToString() ?? "",
-            "audio_format" => provider.Extra?.GetValueOrDefault("audio_format")?.ToString() ?? "",
-            "request_mode" => provider.Extra?.GetValueOrDefault("request_mode")?.ToString() ?? "",
-            "prompt" => provider.Extra?.GetValueOrDefault("prompt")?.ToString() ?? "",
-            "voice_type" => provider.Extra?.GetValueOrDefault("voice_type")?.ToString() ?? "",
-            "language" => provider.Extra?.GetValueOrDefault("language")?.ToString() ?? "",
-            "sample_rate" => provider.Extra?.GetValueOrDefault("sample_rate")?.ToString() ?? "",
-            "speed" => provider.Extra?.GetValueOrDefault("speed")?.ToString() ?? "",
-            "volume" => provider.Extra?.GetValueOrDefault("volume")?.ToString() ?? "",
+            "language_hint" => ReadModelFirst(model, provider, "language_hint"),
+            "response_format" => ReadModelFirst(model, provider, "response_format"),
+            "audio_format" => ReadModelFirst(model, provider, "audio_format"),
+            "request_mode" => ReadModelFirst(model, provider, "request_mode"),
+            "prompt" => ReadModelFirst(model, provider, "prompt"),
+            "voice" => ReadModelFirst(model, provider, "voice"),
+            "voice_type" => ReadModelFirst(model, provider, "voice_type"),
+            "language" => ReadModelFirst(model, provider, "language"),
+            "sample_rate" => ReadModelFirst(model, provider, "sample_rate"),
+            "speed" => ReadModelFirst(model, provider, "speed"),
+            "volume" => ReadModelFirst(model, provider, "volume"),
+            "emotion" => ReadModelFirst(model, provider, "emotion"),
             _ => ""
         };
+    }
+
+    private static string ReadModelFirst(ModelConfig? model, ProviderConfig provider, string key)
+    {
+        if (model?.Extra?.TryGetValue(key, out var modelValue) == true && modelValue != null)
+            return modelValue.ToString() ?? "";
+
+        if (provider.Extra?.TryGetValue(key, out var providerValue) == true && providerValue != null)
+            return providerValue.ToString() ?? "";
+
+        return "";
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
@@ -233,9 +246,11 @@ public partial class SettingsWindow : Window
                 return;
             }
 
+            // 顶层 provider 字段
             ApplyFieldToProvider(provider, "api_host");
             ApplyFieldToProvider(provider, "api_path");
 
+            // api_key：留空不覆盖
             var apiKey = _fieldBoxes.GetValueOrDefault("api_key")?.Text?.Trim();
             if (!string.IsNullOrEmpty(apiKey))
                 provider.ApiKey = apiKey;
@@ -243,28 +258,42 @@ public partial class SettingsWindow : Window
             provider.DefaultModelId = _fieldBoxes.GetValueOrDefault("default_model_id")?.Text?.Trim() ?? provider.DefaultModelId;
 
             provider.Extra ??= new Dictionary<string, object?>();
-            ApplyExtraField(provider, "temperature");
-            ApplyExtraField(provider, "language_hint");
-            ApplyExtraField(provider, "response_format");
-            ApplyExtraField(provider, "audio_format");
-            ApplyExtraField(provider, "request_mode");
-            ApplyExtraField(provider, "prompt");
+
+            // provider-only 字段：只写 provider.extra
             ApplyExtraField(provider, "resource_id");
             ApplyExtraField(provider, "auth_mode");
             ApplyExtraField(provider, "app_id");
-            ApplyExtraField(provider, "voice_type");
-            ApplyExtraField(provider, "language");
-            ApplyExtraField(provider, "sample_rate");
-            ApplyExtraField(provider, "speed");
-            ApplyExtraField(provider, "volume");
 
             if (provider.Models.Count > 0)
             {
                 var model = provider.Models[0];
-                model.MaxOutputTokens = _fieldBoxes.GetValueOrDefault("max_output_tokens")?.Text?.Trim() ?? model.MaxOutputTokens;
                 model.Extra ??= new Dictionary<string, object?>();
-                ApplyModelExtra(model, "reasoning_enabled");
-                ApplyModelExtra(model, "system_prompt");
+
+                // LLM 专属：同时写 provider.extra 和 model.extra
+                ApplyExtraBoth(provider, model, "temperature");
+                model.MaxOutputTokens = _fieldBoxes.GetValueOrDefault("max_output_tokens")?.Text?.Trim() ?? model.MaxOutputTokens;
+                ApplyExtraBoth(provider, model, "max_output_tokens");
+                ApplyExtraBoth(provider, model, "system_prompt");
+                ApplyExtraBoth(provider, model, "reasoning_enabled");
+
+                // STT 专属：同时写 provider.extra 和 model.extra
+                ApplyExtraBoth(provider, model, "language_hint");
+                ApplyExtraBoth(provider, model, "prompt");
+                ApplyExtraBoth(provider, model, "response_format");
+                ApplyExtraBoth(provider, model, "audio_format");
+                ApplyExtraBoth(provider, model, "request_mode");
+
+                // TTS 专属：同时写 provider.extra 和 model.extra
+                ApplyExtraBoth(provider, model, "voice");
+                ApplyExtraBoth(provider, model, "voice_type");
+                ApplyExtraBoth(provider, model, "language");
+                ApplyExtraBoth(provider, model, "sample_rate");
+                ApplyExtraBoth(provider, model, "speed");
+                ApplyExtraBoth(provider, model, "volume");
+                ApplyExtraBoth(provider, model, "emotion");
+
+                // current_model_id 同步：同时写 provider.DefaultModelId 和 model.ModelId
+                SyncCurrentModelId(provider, model);
             }
 
             var json = JsonSerializer.Serialize(_appSettings,
@@ -306,6 +335,22 @@ public partial class SettingsWindow : Window
         model.Extra ??= new Dictionary<string, object?>();
         var value = box.Text?.Trim();
         model.Extra[fieldName] = string.IsNullOrEmpty(value) ? null : value;
+    }
+
+    private void ApplyExtraBoth(ProviderConfig provider, ModelConfig model, string fieldName)
+    {
+        ApplyExtraField(provider, fieldName);
+        ApplyModelExtra(model, fieldName);
+    }
+
+    private void SyncCurrentModelId(ProviderConfig provider, ModelConfig model)
+    {
+        if (!_fieldBoxes.TryGetValue("current_model_id", out var box)) return;
+        var value = box.Text?.Trim();
+        if (string.IsNullOrEmpty(value)) return;
+
+        provider.DefaultModelId = value;
+        model.ModelId = value;
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
