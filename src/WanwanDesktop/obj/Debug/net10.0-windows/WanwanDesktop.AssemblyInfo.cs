@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("WanwanDesktop")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+06050b8de6caf83cfebe3b8c7cdef4d8c4c29ce3")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+725fe4d83b2270050232bac446809631d60e8413")]
 [assembly: System.Reflection.AssemblyProductAttribute("WanwanDesktop")]
 [assembly: System.Reflection.AssemblyTitleAttribute("WanwanDesktop")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
