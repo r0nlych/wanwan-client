@@ -1,17 +1,31 @@
-.venv/
+# Python cache and virtual environment
 __pycache__/
+**/__pycache__/
 *.pyc
-.env
-.env.*
-!.env.example
-logs/*.log
-data/cache/
+.venv/
+
+# .NET build outputs
+bin/
+obj/
+**/bin/
+**/obj/
+
+# Logs
+logs/
+*.log
+
+# Runtime data and generated files
 data/temp/
 data/tts/
+data/cache/
+data/conversations/
+Conversation History/
 build/
 
-# 本地配置（含 api_key，禁止提交）
+# Local settings and environment files
 data/config/app_settings.json
 !data/config/app_settings.example.json
-
-# TTS 运行时生成临时音频文件
+.env
+.env.*
+*.env
+!.env.example
