@@ -14,6 +14,8 @@ public class AudioPlayerService
 
     public bool IsPlaying => _isPlaying;
 
+    public float Volume { get; set; } = 1.0f;
+
     public AudioPlayerService(DesktopLogService log)
     {
         _log = log;
@@ -73,6 +75,7 @@ public class AudioPlayerService
         {
             _isPlaying = true;
             _reader = new AudioFileReader(resolvedPath);
+            _reader.Volume = Volume;
             _player = new WaveOutEvent();
             _player.Init(_reader);
 

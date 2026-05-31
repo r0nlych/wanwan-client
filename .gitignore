@@ -18,6 +18,7 @@ logs/
 data/temp/
 data/tts/
 data/cache/
+data/rvc/
 data/conversations/
 Conversation History/
 build/

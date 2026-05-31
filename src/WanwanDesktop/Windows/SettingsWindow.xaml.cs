@@ -46,10 +46,18 @@ public partial class SettingsWindow : Window
 
     public SettingsWindow(PythonBackendService python, AudioPlayerService player)
     {
-        InitializeComponent();
+        try
+        {
+            InitializeComponent();
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"SettingsWindow InitializeComponent 失败: {ex}", ex);
+        }
 
-        _python = python;
-        _player = player;
+        _python = python ?? throw new ArgumentNullException(nameof(python));
+        _player = player ?? throw new ArgumentNullException(nameof(player));
 
         _projectRoot = AppDomain.CurrentDomain.BaseDirectory;
         while (!string.IsNullOrEmpty(_projectRoot) &&
@@ -84,6 +92,7 @@ public partial class SettingsWindow : Window
                 return;
             }
 
+            InitVoiceVolumeSlider();
             BuildFieldsForTab("llm");
         }
         catch (Exception ex)
@@ -94,6 +103,17 @@ public partial class SettingsWindow : Window
 
     private void ServiceTab_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (ServiceTab.SelectedIndex == 3)
+        {
+            _currentTab = "audio";
+            FieldsScrollViewer.Visibility = Visibility.Collapsed;
+            AudioPanel.Visibility = Visibility.Visible;
+            return;
+        }
+
+        FieldsScrollViewer.Visibility = Visibility.Visible;
+        AudioPanel.Visibility = Visibility.Collapsed;
+
         if (ServiceTab.SelectedIndex == 0) BuildFieldsForTab("llm");
         else if (ServiceTab.SelectedIndex == 1) BuildFieldsForTab("stt");
         else if (ServiceTab.SelectedIndex == 2) BuildFieldsForTab("tts");
@@ -113,6 +133,8 @@ public partial class SettingsWindow : Window
             "tts" => TtsFields,
             _ => Array.Empty<string>()
         };
+
+        TtsTestButton.Visibility = tab == "tts" ? Visibility.Visible : Visibility.Collapsed;
 
         var provider = GetActiveProvider(tab);
         var firstModel = provider?.Models?.FirstOrDefault();
@@ -252,6 +274,15 @@ public partial class SettingsWindow : Window
     {
         if (_appSettings == null) return false;
 
+        if (_currentTab == "audio")
+        {
+            SaveVoiceVolume();
+            var audioJson = JsonSerializer.Serialize(_appSettings,
+                new JsonSerializerOptions { WriteIndented = true, PropertyNameCaseInsensitive = true });
+            File.WriteAllText(_settingsPath, audioJson);
+            return true;
+        }
+
         var provider = GetActiveProvider(_currentTab);
         if (provider == null) return false;
 
@@ -308,6 +339,8 @@ public partial class SettingsWindow : Window
             SyncCurrentModelId(provider, model);
         }
 
+        SaveVoiceVolume();
+
         var json = JsonSerializer.Serialize(_appSettings,
             new JsonSerializerOptions { WriteIndented = true, PropertyNameCaseInsensitive = true });
         File.WriteAllText(_settingsPath, json);
@@ -325,6 +358,12 @@ public partial class SettingsWindow : Window
                 return;
             }
 
+            if (_currentTab == "audio")
+            {
+                MessageBox.Show("保存成功", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
             // 保存后检查当前 tab 的 api_key 是否为空
             var provider = GetActiveProvider(_currentTab);
             var hasApiKey = !string.IsNullOrEmpty(provider?.ApiKey);
@@ -332,14 +371,14 @@ public partial class SettingsWindow : Window
             if (!hasApiKey)
             {
                 MessageBox.Show(
-                    "设置已保存，但当前服务的 API Key 未填写，对应语音功能无法使用。",
+                    "保存成功，但当前服务的 API Key 未填写，对应语音功能无法使用。",
                     "保存提示",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
             }
             else
             {
-                MessageBox.Show("设置已保存（API Key 已配置）", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show("保存成功", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
         catch (Exception ex)
@@ -478,6 +517,7 @@ public partial class SettingsWindow : Window
             }
 
             // WPF 播放必须成功
+            _player.Volume = (float)VoiceVolumeSlider.Value;
             var played = await _player.PlayAsync(result.AudioPath);
             if (!played)
             {
@@ -575,6 +615,92 @@ public partial class SettingsWindow : Window
             return "auth_mode 未填写或仍为模板值，请填写（如 x_api_key 或 legacy_app_access）";
 
         return null;
+    }
+
+    private void VoiceVolumeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (VoiceVolumeLabel == null) return;
+        var percent = (int)(e.NewValue * 100);
+        VoiceVolumeLabel.Text = $"{percent}%";
+    }
+
+    private void InitVoiceVolumeSlider()
+    {
+        if (_appSettings == null) return;
+        var activeId = _appSettings.ActiveProfileId;
+        var profile = _appSettings.Profiles.FirstOrDefault(p => p.ProfileId == activeId);
+        if (profile == null) return;
+
+        var savedVolume = profile.Desktop?.Audio?.VoiceVolume;
+        VoiceVolumeSlider.Value = savedVolume is > 0.09 and <= 2.0 ? savedVolume.Value : 1.0;
+        VoiceVolumeLabel.Text = $"{(int)(VoiceVolumeSlider.Value * 100)}%";
+    }
+
+    private void SaveVoiceVolume()
+    {
+        if (_appSettings == null) return;
+        var activeId = _appSettings.ActiveProfileId;
+        var profile = _appSettings.Profiles.FirstOrDefault(p => p.ProfileId == activeId);
+        if (profile == null) return;
+
+        profile.Desktop ??= new DesktopSettings();
+        profile.Desktop.Audio ??= new DesktopAudioSettings();
+        profile.Desktop.Audio.VoiceVolume = VoiceVolumeSlider.Value;
+    }
+
+    private async void TestVolume_Click(object sender, RoutedEventArgs e)
+    {
+        TestVolumeButton.IsEnabled = false;
+        VoiceVolumeSlider.IsEnabled = false;
+
+        try
+        {
+            var volume = (float)VoiceVolumeSlider.Value;
+            await Task.Run(() => PlayTestTone(volume));
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"测试音量失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            VoiceVolumeSlider.IsEnabled = true;
+            TestVolumeButton.IsEnabled = true;
+        }
+    }
+
+    private void PlayTestTone(float volume)
+    {
+        var sampleRate = 24000;
+        var frequency = 440.0;
+        var durationMs = 600;
+        var sampleCount = sampleRate * durationMs / 1000;
+        var byteCount = sampleCount * 2;
+
+        var buffer = new byte[byteCount];
+        for (int i = 0; i < sampleCount; i++)
+        {
+            var t = (double)i / sampleRate;
+            var envelope = 1.0 - (double)i / sampleCount;
+            var sample = Math.Sin(2.0 * Math.PI * frequency * t) * envelope * 0.3;
+            var intSample = (short)(sample * short.MaxValue);
+            buffer[i * 2] = (byte)(intSample & 0xff);
+            buffer[i * 2 + 1] = (byte)((intSample >> 8) & 0xff);
+        }
+
+        using var stream = new MemoryStream(buffer);
+        var format = new NAudio.Wave.WaveFormat(sampleRate, 16, 1);
+        using var rawSource = new NAudio.Wave.RawSourceWaveStream(stream, format);
+        var toSample = new NAudio.Wave.SampleProviders.Pcm16BitToSampleProvider(rawSource);
+        var vol = new NAudio.Wave.SampleProviders.VolumeSampleProvider(toSample) { Volume = Math.Clamp(volume, 0.0f, 1.0f) };
+        var toWave = new NAudio.Wave.SampleProviders.SampleToWaveProvider(vol);
+        using var player = new NAudio.Wave.WaveOutEvent();
+        player.Init(toWave);
+
+        var tcs = new TaskCompletionSource<bool>();
+        player.PlaybackStopped += (_, _) => tcs.TrySetResult(true);
+        player.Play();
+        tcs.Task.Wait();
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();

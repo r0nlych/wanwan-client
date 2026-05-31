@@ -37,3 +37,43 @@
    - `docs/internal-api-payloads.md`
    - `docs/internal-api-compat.md`
 8. 默认按多 provider、多模型、能力可配置设计，不写死单一接口、单一模型或单一能力。
+
+## 配置兼容四件套
+
+任何涉及以下修改时：
+
+- app_settings.json
+- AppSettings.cs
+- SettingsWindow
+- 设置页 UI
+- 配置读取
+- 配置保存
+- 新增配置字段
+
+必须遵守：
+
+1. **新增配置字段必须提供默认值**（C# 类字段初始化、JSON schema 默认值）
+2. **必须兼容旧版 app_settings.json**（旧版缺少新字段时不崩溃，自动使用默认值）
+3. **所有嵌套对象读取前必须做 null 兜底初始化** → 禁止直接假设 `desktop` 一定存在、`audio` 一定存在
+4. **修改完成后必须实际打开设置页验证**
+
+示例：
+
+```csharp
+// ✅ 安全读取
+profile.Desktop ??= new DesktopSettings();
+profile.Desktop.Audio ??= new DesktopAudioSettings();
+var vol = profile.Desktop.Audio.VoiceVolume;
+
+// ❌ 禁止
+var vol = profile.Desktop.Audio.VoiceVolume; // Desktop 或 Audio 可能为 null
+```
+
+## 设置页验收标准
+
+- `dotnet build` 通过
+- 客户端启动成功
+- 设置页可以打开
+- 旧版 `app_settings.json` 不崩溃
+- 缺失字段自动使用默认值
+- 保存后配置结构完整

@@ -212,6 +212,7 @@ public partial class MainWindow : Window
             if (!string.IsNullOrEmpty(ttsPath))
             {
                 SetStatus("播放中...");
+                _player.Volume = ReadVoiceVolumeFromSettings();
                 var played = await _player.PlayAsync(ttsPath);
 
                 if (played)
@@ -425,8 +426,10 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _log.Error("settings.error", "打开设置页失败", new() { ["error"] = ex.Message });
-            MessageBox.Show($"打开设置页失败\nstep=settings\nerror_type={ex.GetType().Name}\nerror_message={ex.Message}",
+            _settingsWindow = null;
+            var fullError = ex.ToString();
+            _log.Error("settings.error", "打开设置页失败", new() { ["error"] = fullError });
+            MessageBox.Show($"打开设置页失败\nstep=settings\nerror_type={ex.GetType().Name}\n\n{fullError}",
                 "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
@@ -525,5 +528,38 @@ public partial class MainWindow : Window
             Application.Current.Shutdown();
         }
         catch { }
+    }
+
+    private float ReadVoiceVolumeFromSettings()
+    {
+        try
+        {
+            var projectRoot = AppDomain.CurrentDomain.BaseDirectory;
+            while (!string.IsNullOrEmpty(projectRoot) && !File.Exists(Path.Combine(projectRoot, "AGENTS.md")))
+            {
+                var parent = Directory.GetParent(projectRoot);
+                if (parent == null) break;
+                projectRoot = parent.FullName;
+            }
+            var settingsPath = Path.Combine(projectRoot, "data", "config", "app_settings.json");
+            if (!File.Exists(settingsPath)) return 1.0f;
+
+            var json = File.ReadAllText(settingsPath);
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var profiles = doc.RootElement.GetProperty("profiles");
+            if (profiles.GetArrayLength() == 0) return 1.0f;
+
+            var profile = profiles[0];
+            if (!profile.TryGetProperty("desktop", out var desktop)) return 1.0f;
+            if (!desktop.TryGetProperty("audio", out var audio)) return 1.0f;
+            if (!audio.TryGetProperty("voice_volume", out var vol)) return 1.0f;
+
+            var value = vol.GetDouble();
+            return value is >= 0.1 and <= 2.0 ? (float)value : 1.0f;
+        }
+        catch
+        {
+            return 1.0f;
+        }
     }
 }

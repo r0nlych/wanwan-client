@@ -123,4 +123,13 @@ public class DesktopSettings
 {
     [JsonPropertyName("volume")]
     public double? Volume { get; set; }
+
+    [JsonPropertyName("audio")]
+    public DesktopAudioSettings? Audio { get; set; }
+}
+
+public class DesktopAudioSettings
+{
+    [JsonPropertyName("voice_volume")]
+    public double VoiceVolume { get; set; } = 1.0;
 }
