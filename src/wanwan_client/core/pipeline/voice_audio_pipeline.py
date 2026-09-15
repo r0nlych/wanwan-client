@@ -8,13 +8,13 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, Callable, Protocol
 
 import requests
 
 from src.wanwan_client.core.config.runtime_config import RuntimeConfig
 from src.wanwan_client.desktop.playback import LocalAudioPlayer
-from src.wanwan_client.services.llm.providers import OpenAICompatibleLlmProvider
+from src.wanwan_client.services.llm.providers import BaseLlmProvider, LlmProviderRegistry
 from src.wanwan_client.services.stt.providers.base import (
     SttProviderRequest,
     build_stt_stage_result,
@@ -25,6 +25,13 @@ from src.wanwan_client.services.tts.providers.base import (
     TtsProviderRequest,
     build_tts_stage_result,
 )
+
+
+class CancellationSignal(Protocol):
+    """Pipeline 只读取取消状态，不依赖 Runtime 的具体实现。"""
+
+    @property
+    def is_cancelled(self) -> bool: ...
 
 
 class VoiceAudioPipeline:
@@ -38,17 +45,27 @@ class VoiceAudioPipeline:
         self,
         runtime_config: RuntimeConfig,
         stt_provider_registry: SttProviderRegistry | None = None,
-        llm_provider: OpenAICompatibleLlmProvider | None = None,
+        llm_provider: BaseLlmProvider | None = None,
         tts_provider_registry: TtsProviderRegistry | None = None,
         audio_player: LocalAudioPlayer | None = None,
+        llm_provider_registry: LlmProviderRegistry | None = None,
     ) -> None:
         self.runtime_config = runtime_config
         self.stt_provider_registry = stt_provider_registry or SttProviderRegistry()
-        self.llm_provider = llm_provider or OpenAICompatibleLlmProvider()
+        self.llm_provider = llm_provider
+        self.llm_provider_registry = llm_provider_registry or LlmProviderRegistry()
         self.tts_provider_registry = tts_provider_registry or TtsProviderRegistry()
         self.audio_player = audio_player or LocalAudioPlayer()
 
-    def run(self, audio_path: str | Path, session_id: str | None = None, skip_playback: bool = False) -> dict[str, Any]:
+    def run(
+        self,
+        audio_path: str | Path,
+        session_id: str | None = None,
+        skip_playback: bool = False,
+        *,
+        cancellation_token: CancellationSignal | None = None,
+        on_stage_started: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         trace_id = self._build_trace_id()
         resolved_session_id = session_id or self._build_session_id()
         stages: list[dict[str, Any]] = []
@@ -62,6 +79,11 @@ class VoiceAudioPipeline:
         llm_messages: list[dict[str, Any]] = []
         tts_input_text = ""
 
+        if self._append_cancelled_stage_if_needed(
+            cancellation_token, trace_id, resolved_session_id, stages, "stt"
+        ):
+            return self._build_pipeline_result(trace_id, resolved_session_id, stages)
+        self._notify_stage_started(on_stage_started, "stt")
         stt_started = perf_counter()
         try:
             stt_provider_config, stt_model = self.runtime_config.resolve_provider_and_model("stt")
@@ -132,6 +154,11 @@ class VoiceAudioPipeline:
             )
             return self._build_pipeline_result(trace_id, resolved_session_id, stages)
 
+        if self._append_cancelled_stage_if_needed(
+            cancellation_token, trace_id, resolved_session_id, stages, "llm"
+        ):
+            return self._build_pipeline_result(trace_id, resolved_session_id, stages)
+        self._notify_stage_started(on_stage_started, "llm")
         llm_started = perf_counter()
         try:
             llm_provider_config, llm_model = self.runtime_config.resolve_provider_and_model("llm")
@@ -142,7 +169,8 @@ class VoiceAudioPipeline:
                     llm_provider_config.extra.get("system_prompt"),
                 ),
             )
-            llm_result = self.llm_provider.generate_reply(
+            llm_provider = self.llm_provider or self.llm_provider_registry.resolve(llm_provider_config)
+            llm_result = llm_provider.generate_reply(
                 messages=llm_messages,
                 provider_config=llm_provider_config,
                 model_config=llm_model,
@@ -190,7 +218,7 @@ class VoiceAudioPipeline:
                         "capabilities": list(llm_model.capabilities or llm_provider_config.capabilities),
                         "content_type": "text/plain",
                         "protocol_version": self.PROTOCOL_VERSION,
-                        "adapter_version": self.llm_provider.ADAPTER_VERSION,
+                        "adapter_version": llm_provider.ADAPTER_VERSION,
                         "duration_ms": self._duration_ms(llm_started),
                         "request_id": llm_result.get("request_id"),
                         "usage": llm_result.get("raw_usage"),
@@ -219,6 +247,11 @@ class VoiceAudioPipeline:
             )
             return self._build_pipeline_result(trace_id, resolved_session_id, stages)
 
+        if self._append_cancelled_stage_if_needed(
+            cancellation_token, trace_id, resolved_session_id, stages, "tts"
+        ):
+            return self._build_pipeline_result(trace_id, resolved_session_id, stages)
+        self._notify_stage_started(on_stage_started, "tts")
         tts_started = perf_counter()
         try:
             tts_provider_config, tts_model = self.runtime_config.resolve_provider_and_model("tts")
@@ -296,6 +329,11 @@ class VoiceAudioPipeline:
             )
             return self._build_pipeline_result(trace_id, resolved_session_id, stages)
 
+        if self._append_cancelled_stage_if_needed(
+            cancellation_token, trace_id, resolved_session_id, stages, "playback"
+        ):
+            return self._build_pipeline_result(trace_id, resolved_session_id, stages)
+        self._notify_stage_started(on_stage_started, "playback")
         playback_started = perf_counter()
         try:
             playback_result = self.audio_player.play(tts_result.audio_ref["value"])
@@ -349,6 +387,9 @@ class VoiceAudioPipeline:
                 )
             )
 
+        self._append_cancelled_stage_if_needed(
+            cancellation_token, trace_id, resolved_session_id, stages, "voice_runtime"
+        )
         return self._build_pipeline_result(trace_id, resolved_session_id, stages)
 
     def _build_pipeline_result(self, trace_id: str, session_id: str, stages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -357,6 +398,8 @@ class VoiceAudioPipeline:
             if stage["status"] == "failed":
                 final_status = "failed"
                 break
+            if stage["status"] == "cancelled":
+                final_status = "cancelled"
         stt_text = None
         reply_text = None
         audio_ref = None
@@ -391,6 +434,46 @@ class VoiceAudioPipeline:
                 "failed_stage": failed_stage,
             },
         }
+
+    def _append_cancelled_stage_if_needed(
+        self,
+        token: CancellationSignal | None,
+        trace_id: str,
+        session_id: str,
+        stages: list[dict[str, Any]],
+        step: str,
+    ) -> bool:
+        """在阶段边界响应取消，保留已完成阶段并输出协议兼容的 cancelled 状态。"""
+        if token is None or not token.is_cancelled:
+            return False
+        stages.append(
+            self._build_stage_result(
+                trace_id=trace_id,
+                session_id=session_id,
+                step=step,
+                status="cancelled",
+                payload={"input": {}, "output": {}, "refs": {}, "options": {}},
+                error={
+                    "code": "VOICE_TURN_CANCELLED",
+                    "message": "Voice turn was cancelled",
+                    "type": "cancelled",
+                    "retryable": False,
+                    "details": {},
+                    "raw_ref": None,
+                },
+                meta={"protocol_version": self.PROTOCOL_VERSION},
+            )
+        )
+        return True
+
+    def _notify_stage_started(
+        self,
+        callback: Callable[[str], None] | None,
+        step: str,
+    ) -> None:
+        """仅暴露稳定阶段名，让 Runtime 管理状态而不侵入数据处理。"""
+        if callback is not None:
+            callback(step)
 
     def _build_stage_result(
         self,

@@ -14,7 +14,7 @@ import requests
 
 from src.wanwan_client.core.config.runtime_config import RuntimeConfig
 from src.wanwan_client.desktop.playback import LocalAudioPlayer
-from src.wanwan_client.services.llm.providers import OpenAICompatibleLlmProvider
+from src.wanwan_client.services.llm.providers import BaseLlmProvider, LlmProviderRegistry
 from src.wanwan_client.services.tts.providers import TtsProviderRegistry
 from src.wanwan_client.services.tts.providers.base import TtsProviderRequest
 
@@ -29,12 +29,16 @@ class TextAudioPipeline:
     def __init__(
         self,
         runtime_config: RuntimeConfig,
-        llm_provider: OpenAICompatibleLlmProvider | None = None,
+        llm_provider: BaseLlmProvider | None = None,
         tts_provider_registry: TtsProviderRegistry | None = None,
         audio_player: LocalAudioPlayer | None = None,
+        llm_provider_registry: LlmProviderRegistry | None = None,
     ):
         self.runtime_config = runtime_config
-        self.llm_provider = llm_provider or OpenAICompatibleLlmProvider()
+        # 显式注入优先；未注入时不在构造期绑定具体厂商，
+        # 而是在 run() 中按当前配置的 adapter_kind 经 registry 解析
+        self.llm_provider = llm_provider
+        self.llm_provider_registry = llm_provider_registry or LlmProviderRegistry()
         self.tts_provider_registry = tts_provider_registry or TtsProviderRegistry()
         self.audio_player = audio_player or LocalAudioPlayer()
 
@@ -52,10 +56,15 @@ class TextAudioPipeline:
 
         llm_started = perf_counter()
         try:
-            llm_provider, llm_model = self.runtime_config.resolve_provider_and_model("llm")
-            llm_result = self.llm_provider.generate_reply(
+            llm_provider_config, llm_model = self.runtime_config.resolve_provider_and_model("llm")
+            # 与 VoiceAudioPipeline 一致：显式注入优先，否则按 adapter_kind 解析
+            resolved_llm_provider = (
+                self.llm_provider
+                or self.llm_provider_registry.resolve(llm_provider_config)
+            )
+            llm_result = resolved_llm_provider.generate_reply(
                 messages=messages,
-                provider_config=llm_provider,
+                provider_config=llm_provider_config,
                 model_config=llm_model,
             )
             llm_stage = self._build_stage_result(
@@ -86,12 +95,12 @@ class TextAudioPipeline:
                     },
                 },
                 meta={
-                    "provider": llm_provider.provider_id,
+                    "provider": llm_provider_config.provider_id,
                     "model": llm_model.model_id,
                     "capabilities": list(llm_model.capabilities),
                     "content_type": "text/plain",
                     "protocol_version": self.PROTOCOL_VERSION,
-                    "adapter_version": self.llm_provider.ADAPTER_VERSION,
+                    "adapter_version": resolved_llm_provider.ADAPTER_VERSION,
                     "duration_ms": self._duration_ms(llm_started),
                     "request_id": llm_result.get("request_id"),
                 },

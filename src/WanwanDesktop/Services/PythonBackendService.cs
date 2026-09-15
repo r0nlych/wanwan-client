@@ -3,7 +3,9 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
+using WanwanDesktop.Infrastructure;
 using WanwanDesktop.Models;
 
 namespace WanwanDesktop.Services;
@@ -19,8 +21,30 @@ public class TtsTestResult
     public bool IsSuccess => AudioPath != null && ErrorMessage == null;
 }
 
+/// <summary>
+/// 语音链子进程调用结果。
+/// Result 非空表示 Python 返回了可解析的结构化结果（其中可能是 success 或阶段失败）；
+/// Result 为空表示传输层失败，FailureCode 区分超时 / 无输出 / JSON 非法 / 进程异常。
+/// </summary>
+public sealed class VoiceChainInvokeResult
+{
+    public VoiceChainResult? Result { get; init; }
+    public string? FailureCode { get; init; }
+    public string? FailureMessage { get; init; }
+
+    public bool IsSuccess => Result is { Status: "success" };
+
+    public static VoiceChainInvokeResult Ok(VoiceChainResult result) => new() { Result = result };
+
+    public static VoiceChainInvokeResult TransportFailure(string code, string message) =>
+        new() { FailureCode = code, FailureMessage = message };
+}
+
 public class PythonBackendService
 {
+    // 语音链路包含 STT + LLM + TTS 三段网络调用，deepseek-reasoner 偶发较慢，超时给到 180 秒
+    private const int VoiceChainTimeoutSeconds = 180;
+
     private readonly DesktopLogService _log;
     private readonly string _projectRoot;
     private readonly string _pythonPath;
@@ -29,13 +53,8 @@ public class PythonBackendService
     {
         _log = log;
 
-        _projectRoot = AppDomain.CurrentDomain.BaseDirectory;
-        while (!string.IsNullOrEmpty(_projectRoot) && !File.Exists(Path.Combine(_projectRoot, "AGENTS.md")))
-        {
-            var parent = Directory.GetParent(_projectRoot);
-            if (parent == null) break;
-            _projectRoot = parent.FullName;
-        }
+        // 项目根目录统一由 ProjectPaths 定位，不再在本服务内重复向上查找
+        _projectRoot = ProjectPaths.ProjectRoot;
 
         _pythonPath = Path.Combine(_projectRoot, ".venv", "Scripts", "python.exe");
         if (!File.Exists(_pythonPath))
@@ -44,7 +63,7 @@ public class PythonBackendService
         }
     }
 
-    public async Task<VoiceChainResult?> RunVoiceChainAsync(string audioPath)
+    public async Task<VoiceChainInvokeResult> RunVoiceChainAsync(string audioPath)
     {
         _log.Info("python.start", "开始调用 Python 后端",
             new() { ["audio_path"] = audioPath, ["python_path"] = _pythonPath });
@@ -83,7 +102,23 @@ public class PythonBackendService
             process.Start();
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
-            await process.WaitForExitAsync();
+
+            // 超时保护：Python 端挂起时不能让 UI 永久等待，超时后杀掉整个进程树
+            using var timeoutCts = new CancellationTokenSource(
+                TimeSpan.FromSeconds(VoiceChainTimeoutSeconds));
+            try
+            {
+                await process.WaitForExitAsync(timeoutCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                _log.Error("python.timeout", $"语音链路超时（{VoiceChainTimeoutSeconds} 秒），已终止 Python 进程",
+                    new() { ["timeout_seconds"] = VoiceChainTimeoutSeconds });
+                return VoiceChainInvokeResult.TransportFailure(
+                    "TIMEOUT",
+                    $"Python 语音链路处理超时（{VoiceChainTimeoutSeconds} 秒），已终止，请重试或检查网络");
+            }
 
             var stdout = stdoutBuilder.ToString().Trim();
             var stderr = stderrBuilder.ToString().Trim();
@@ -106,7 +141,12 @@ public class PythonBackendService
             var result = TryParseVoiceChainResult(stdout);
             if (result == null)
             {
-                return null;
+                // 传输层失败：区分“无输出”和“输出无法解析”，便于界面给出准确提示
+                var code = string.IsNullOrWhiteSpace(stdout) ? "NO_OUTPUT" : "INVALID_JSON";
+                var message = code == "NO_OUTPUT"
+                    ? "Python 后端没有返回内容，请检查 Python 环境与依赖"
+                    : "Python 后端返回内容无法解析，请查看日志";
+                return VoiceChainInvokeResult.TransportFailure(code, message);
             }
 
             _log.Info("python.result", process.ExitCode == 0 ? "Python 后端返回成功" : "Python 后端返回结构化失败",
@@ -118,13 +158,15 @@ public class PythonBackendService
                     ["conversation_saved"] = result.ConversationSave?.Saved,
                 });
 
-            return result;
+            return VoiceChainInvokeResult.Ok(result);
         }
         catch (Exception ex)
         {
             _log.Error("python.exception", "调用 Python 异常",
                 new() { ["error"] = ex.Message, ["stack_trace"] = ex.StackTrace });
-            return null;
+            return VoiceChainInvokeResult.TransportFailure(
+                "PROCESS_EXCEPTION",
+                $"调用 Python 后端时发生异常：{ex.Message}");
         }
     }
 

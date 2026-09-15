@@ -9,10 +9,11 @@ from typing import Any
 from src.wanwan_client.infrastructure.http.openai_compatible_client import (
     OpenAICompatibleHttpClient,
 )
+from src.wanwan_client.services.llm.providers.base import BaseLlmProvider
 from src.wanwan_client.shared.schemas import ProviderConfig, ProviderModelConfig
 
 
-class OpenAICompatibleLlmProvider:
+class OpenAICompatibleLlmProvider(BaseLlmProvider):
     """
     最小真实可跑 LLM 适配器。
     """

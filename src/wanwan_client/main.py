@@ -93,6 +93,24 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["sync_url", "sync_base64", "async_url", "async_base64"],
         help="Optional STT request mode override.",
     )
+    run_stt_audio_parser.add_argument(
+        "--provider-id",
+        dest="provider_id",
+        default=None,
+        help=(
+            "Optional STT provider id. "
+            "When omitted, the active profile's default_provider_id is used."
+        ),
+    )
+    run_stt_audio_parser.add_argument(
+        "--model-id",
+        dest="model_id",
+        default=None,
+        help=(
+            "Optional STT model id. "
+            "When omitted, the selected provider's default_model_id is used."
+        ),
+    )
 
     run_tts_text_parser = subparsers.add_parser(
         "run-tts-text",
@@ -219,7 +237,10 @@ def main():
             result = service.transcribe(
                 audio_ref=audio_ref,
                 session_id=args.session_id,
-                provider_id="doubao_flash_stt_primary",
+                # 未显式传参时保持 None，由 RuntimeConfig 按
+                # default_provider_id / default_model_id 解析，不写死任何厂商
+                provider_id=args.provider_id,
+                model_id=args.model_id,
                 audio_format=args.audio_format,
                 request_mode=args.request_mode,
             )

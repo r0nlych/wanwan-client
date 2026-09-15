@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 using NAudio.Wave;
+using WanwanDesktop.Infrastructure;
 
 namespace WanwanDesktop.Services;
 
@@ -26,13 +27,8 @@ public class AudioPlayerService
         if (_isPlaying)
             throw new InvalidOperationException("已经在播放中");
 
-        string projectRoot = AppDomain.CurrentDomain.BaseDirectory;
-        while (!string.IsNullOrEmpty(projectRoot) && !File.Exists(Path.Combine(projectRoot, "AGENTS.md")))
-        {
-            var parent = Directory.GetParent(projectRoot);
-            if (parent == null) break;
-            projectRoot = parent.FullName;
-        }
+        // 项目根目录统一由 ProjectPaths 提供，用于把相对音频路径解析为绝对路径
+        var projectRoot = ProjectPaths.ProjectRoot;
 
         // Resolve relative path
         var resolvedPath = ttsAudioPath;

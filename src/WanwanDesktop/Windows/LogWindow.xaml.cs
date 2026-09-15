@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Windows;
+using WanwanDesktop.Infrastructure;
 using WanwanDesktop.Services;
 
 namespace WanwanDesktop.Windows;
@@ -19,13 +20,8 @@ public partial class LogWindow : Window
     {
         InitializeComponent();
 
-        string projectRoot = AppDomain.CurrentDomain.BaseDirectory;
-        while (!string.IsNullOrEmpty(projectRoot) && !File.Exists(Path.Combine(projectRoot, "AGENTS.md")))
-        {
-            var parent = Directory.GetParent(projectRoot);
-            if (parent == null) break;
-            projectRoot = parent.FullName;
-        }
+        // 日志目录基于统一的项目根目录定位
+        var projectRoot = ProjectPaths.ProjectRoot;
 
         _logDir = Path.Combine(projectRoot, "logs");
         Directory.CreateDirectory(_logDir);

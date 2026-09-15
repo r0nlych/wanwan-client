@@ -11,6 +11,7 @@ from typing import Any
 
 from src.wanwan_client.core.app import RuntimeApp
 from src.wanwan_client.core.pipeline import VoiceAudioPipeline
+from src.wanwan_client.core.runtime import VoiceRuntime
 from src.wanwan_client.services.storage import ConversationStore
 
 
@@ -21,6 +22,7 @@ class VoiceChainController:
 
     def __init__(self, runtime_app: RuntimeApp | None = None) -> None:
         self.runtime_app = runtime_app or RuntimeApp()
+        self._voice_runtime: VoiceRuntime | None = None
 
     def run(self, audio_path: str, session_id: str | None = None, skip_playback: bool = False) -> dict[str, Any]:
         normalized_audio_path = str(audio_path).strip()
@@ -45,13 +47,25 @@ class VoiceChainController:
         else:
             state = self.runtime_app.load_state()
             pipeline = VoiceAudioPipeline(runtime_config=state.runtime_config)
-            result = pipeline.run(audio_path=normalized_audio_path, session_id=resolved_session_id, skip_playback=skip_playback)
+            voice_runtime = VoiceRuntime(pipeline=pipeline)
+            self._voice_runtime = voice_runtime
+            result = voice_runtime.run_turn(
+                audio_path=normalized_audio_path,
+                session_id=resolved_session_id,
+                skip_playback=skip_playback,
+            )
             self._attach_controller_meta(result)
             self._attach_final_audio_path(result)
 
         save_meta = ConversationStore.save(result)
         result["conversation_save"] = save_meta
         return result
+
+    def cancel_current_turn(self) -> bool:
+        """供后续桌面事件或 VAD 从另一线程取消当前 Python 语音轮次。"""
+        if self._voice_runtime is None:
+            return False
+        return self._voice_runtime.cancel_current_turn()
 
     def _build_validation_failure(
         self,

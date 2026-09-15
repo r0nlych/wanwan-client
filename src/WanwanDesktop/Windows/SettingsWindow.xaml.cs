@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using WanwanDesktop.Infrastructure;
 using WanwanDesktop.Models;
 using WanwanDesktop.Services;
 
@@ -59,14 +60,8 @@ public partial class SettingsWindow : Window
         _python = python ?? throw new ArgumentNullException(nameof(python));
         _player = player ?? throw new ArgumentNullException(nameof(player));
 
-        _projectRoot = AppDomain.CurrentDomain.BaseDirectory;
-        while (!string.IsNullOrEmpty(_projectRoot) &&
-               !File.Exists(Path.Combine(_projectRoot, "AGENTS.md")))
-        {
-            var parent = Directory.GetParent(_projectRoot);
-            if (parent == null) break;
-            _projectRoot = parent.FullName;
-        }
+        // 设置文件路径基于统一的项目根目录拼接
+        _projectRoot = ProjectPaths.ProjectRoot;
         _settingsPath = Path.Combine(_projectRoot, "data", "config", "app_settings.json");
 
         Loaded += (_, _) => LoadSettings();
@@ -631,7 +626,7 @@ public partial class SettingsWindow : Window
         var profile = _appSettings.Profiles.FirstOrDefault(p => p.ProfileId == activeId);
         if (profile == null) return;
 
-        var savedVolume = profile.Desktop?.Audio?.VoiceVolume;
+        var savedVolume = profile.Desktop?.ResolveVoiceVolume();
         VoiceVolumeSlider.Value = savedVolume is > 0.09 and <= 2.0 ? savedVolume.Value : 1.0;
         VoiceVolumeLabel.Text = $"{(int)(VoiceVolumeSlider.Value * 100)}%";
     }
@@ -644,8 +639,9 @@ public partial class SettingsWindow : Window
         if (profile == null) return;
 
         profile.Desktop ??= new DesktopSettings();
-        profile.Desktop.Audio ??= new DesktopAudioSettings();
-        profile.Desktop.Audio.VoiceVolume = VoiceVolumeSlider.Value;
+        profile.Desktop.Volume = VoiceVolumeSlider.Value;
+        // 收口为单层 desktop.volume：清理反序列化时捕获的旧 audio 块，避免保存时残留旧字段
+        profile.Desktop.Extra?.Remove("audio");
     }
 
     private async void TestVolume_Click(object sender, RoutedEventArgs e)

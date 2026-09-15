@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using NAudio.Wave;
+using WanwanDesktop.Infrastructure;
 using WanwanDesktop.Models;
 
 namespace WanwanDesktop.Services;
@@ -27,13 +28,8 @@ public class AudioRecorderService
 
         try
         {
-            string projectRoot = AppDomain.CurrentDomain.BaseDirectory;
-            while (!string.IsNullOrEmpty(projectRoot) && !File.Exists(Path.Combine(projectRoot, "AGENTS.md")))
-            {
-                var parent = Directory.GetParent(projectRoot);
-                if (parent == null) break;
-                projectRoot = parent.FullName;
-            }
+            // 录音临时目录基于统一的项目根目录拼接
+            var projectRoot = ProjectPaths.ProjectRoot;
             var tempDir = Path.Combine(projectRoot, "data", "temp");
             Directory.CreateDirectory(tempDir);
 

@@ -25,6 +25,7 @@ build/
 
 # Local settings and environment files
 data/config/app_settings.json
+data/config/*.bak*
 !data/config/app_settings.example.json
 .env
 .env.*

@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace WanwanDesktop.Models;
@@ -124,12 +126,27 @@ public class DesktopSettings
     [JsonPropertyName("volume")]
     public double? Volume { get; set; }
 
-    [JsonPropertyName("audio")]
-    public DesktopAudioSettings? Audio { get; set; }
-}
+    // 捕获旧版 desktop.audio 等未映射字段，仅用于旧配置兼容回退（保存时会清理）
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
 
-public class DesktopAudioSettings
-{
-    [JsonPropertyName("voice_volume")]
-    public double VoiceVolume { get; set; } = 1.0;
+    /// <summary>
+    /// 解析有效音量：优先顶层 volume（desktop.volume）；
+    /// 缺失或不在 [0.1, 2.0] 时回退旧版 desktop.audio.voice_volume；仍无效则返回 null。
+    /// </summary>
+    public double? ResolveVoiceVolume()
+    {
+        if (Volume is > 0.09 and <= 2.0) return Volume;
+
+        if (Extra?.TryGetValue("audio", out var audioEl) == true
+            && audioEl.ValueKind == JsonValueKind.Object
+            && audioEl.TryGetProperty("voice_volume", out var volEl)
+            && volEl.TryGetDouble(out var oldVol)
+            && oldVol is > 0.09 and <= 2.0)
+        {
+            return oldVol;
+        }
+
+        return null;
+    }
 }

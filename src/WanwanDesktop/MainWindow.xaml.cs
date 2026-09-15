@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -28,7 +29,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        _log = new DesktopLogService();
+        // 复用进程级共享日志服务，保证 App 全局兜底与主窗口写入同一份日志
+        _log = DesktopLogService.Shared;
         _python = new PythonBackendService(_log);
         _recorder = new AudioRecorderService(_log);
         _player = new AudioPlayerService(_log);
@@ -129,9 +131,10 @@ public partial class MainWindow : Window
 
     private async void ChooseAudio_Click(object sender, RoutedEventArgs e)
     {
-        if (_isRunning)
+        // 处理中或录音中都不允许再提交一段音频，防止重复进入链路
+        if (_isRunning || _recorder.IsRecording)
         {
-            SetStatus("运行中...");
+            SetStatus(_recorder.IsRecording ? "录音中..." : "处理中...");
             return;
         }
 
@@ -141,14 +144,26 @@ public partial class MainWindow : Window
 
             var dialog = new OpenFileDialog
             {
-                Title = "选择本地音频文件",
-                Filter = "音频文件 (*.webm;*.wav)|*.webm;*.wav|All Files (*.*)|*.*",
+                // 当前演示版本录音与 NAudio 播放链路仅可靠支持 WAV，明确限制可选格式
+                Title = "选择本地 WAV 音频文件",
+                Filter = "WAV 音频文件 (*.wav)|*.wav|所有文件 (*.*)|*.*",
                 InitialDirectory = Path.GetFullPath(Path.Combine(_python.GetProjectRoot(), "data", "temp")),
             };
 
             if (dialog.ShowDialog() != true)
             {
                 SetStatus("已取消");
+                return;
+            }
+
+            // 即使用户通过“所有文件”选了其他格式，也在提交前拦截并提示
+            if (!dialog.FileName.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+            {
+                SetStatus("仅支持 WAV");
+                _log.Warn("choose_audio.unsupported_format", "选择了非 WAV 文件，已拒绝提交",
+                    new() { ["audio_path"] = dialog.FileName });
+                MessageBox.Show("当前演示版本仅可靠支持 WAV 音频，请选择 .wav 文件。",
+                    "晚晚", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -176,24 +191,53 @@ public partial class MainWindow : Window
 
         try
         {
-            var result = await _python.RunVoiceChainAsync(audioPath);
+            // 当前 IPC 只有一次最终结果，无法确认 STT/LLM/TTS 实时阶段，
+            // 等待期间统一显示“处理中”，不伪造 TRANSCRIBING/THINKING/SPEAKING
+            var outcome = await _python.RunVoiceChainAsync(audioPath);
 
-            if (result == null || result.Status != "success")
+            if (!outcome.IsSuccess)
             {
-                SetStatus("失败");
-                var failureMessage = BuildVoiceChainFailureMessage(result);
-                SetResult(failureMessage);
-                _log.Error("voice_chain.failed", "语音链路失败",
-                    new()
-                    {
-                        ["failure"] = failureMessage,
-                        ["trace_id"] = result?.TraceId,
-                        ["step"] = ResolveFailedStep(result),
-                        ["step_display"] = GetStepDisplayName(ResolveFailedStep(result)),
-                    });
-                _isRunning = false;
+                if (outcome.Result == null)
+                {
+                    // 传输层失败：超时 / 无输出 / JSON 非法 / 进程异常
+                    SetStatus(outcome.FailureCode == "TIMEOUT" ? "Python 超时" : "后端失败");
+                    SetResult(outcome.FailureMessage ?? "Python 后端调用失败");
+                    _log.Error("voice_chain.transport_failed", "语音链路传输层失败",
+                        new()
+                        {
+                            ["failure_code"] = outcome.FailureCode,
+                            ["failure_message"] = outcome.FailureMessage,
+                        });
+                    MessageBox.Show(
+                        $"{outcome.FailureMessage}\n\n错误代码：{outcome.FailureCode}",
+                        "晚晚", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+                else
+                {
+                    // 结构化阶段失败：Python 正常返回，但 STT/LLM/TTS 等某阶段失败
+                    var failedResult = outcome.Result;
+                    var failedStep = ResolveFailedStep(failedResult);
+                    var failureMessage = BuildVoiceChainFailureMessage(failedResult);
+
+                    SetStatus(BuildFailureStatus(failedStep));
+                    SetResult(failureMessage);
+                    _log.Error("voice_chain.failed", "语音链路失败",
+                        new()
+                        {
+                            ["failure"] = failureMessage,
+                            ["trace_id"] = failedResult.TraceId,
+                            ["step"] = failedStep,
+                            ["step_display"] = GetStepDisplayName(failedStep),
+                        });
+                }
+
+                // 失败后状态已可继续下一轮录音（_isRunning 由 finally 统一复位）
                 return;
             }
+
+            var result = outcome.Result;
+            // 理论不可达：IsSuccess 已保证 Result 非空，守卫仅用于让空引用流分析明确
+            if (result == null) return;
 
             var sttText = result.Final?.SttText ?? "";
             var replyText = result.Final?.ReplyText ?? result.Final?.LlmReplyText ?? "";
@@ -211,20 +255,37 @@ public partial class MainWindow : Window
 
             if (!string.IsNullOrEmpty(ttsPath))
             {
-                SetStatus("播放中...");
-                _player.Volume = ReadVoiceVolumeFromSettings();
-                var played = await _player.PlayAsync(ttsPath);
-
-                if (played)
+                // 当前演示版本 NAudio 播放链路仅可靠支持 WAV；
+                // TTS 若配置成其他格式，明确提示，而不是静默“播放失败”
+                if (!ttsPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
                 {
-                    SetStatus("完成");
+                    const string formatMessage = "TTS 输出不是 WAV，当前演示版本仅支持 WAV 自动播放";
+                    SetStatus("播放失败");
+                    SetResult(formatMessage);
+                    _log.Error("playback.unsupported_format", "TTS 输出格式不受支持，已跳过播放",
+                        new() { ["tts_audio_path"] = ttsPath });
+                    MessageBox.Show(
+                        $"{formatMessage}\n请在设置中将 TTS 输出格式调整为 wav 后重试。",
+                        "晚晚", MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
                 else
                 {
-                    SetStatus("播放失败");
-                    _log.Error("playback.ui_failed", "播放失败");
-                    MessageBox.Show($"播放失败\nstep=playback\nerror_type=playback_error\nerror_message=无法播放 TTS 音频",
-                        "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    SetStatus("播放中...");
+                    _player.Volume = ReadVoiceVolumeFromSettings();
+                    var played = await _player.PlayAsync(ttsPath);
+
+                    if (played)
+                    {
+                        SetStatus("完成");
+                    }
+                    else
+                    {
+                        // 播放结束/失败都要回到可再次录音的状态（_isRunning 由 finally 复位）
+                        SetStatus("播放失败");
+                        _log.Error("playback.ui_failed", "播放失败");
+                        MessageBox.Show($"播放失败\nstep=playback\nerror_type=playback_error\nerror_message=无法播放 TTS 音频",
+                            "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
                 }
             }
             else
@@ -348,6 +409,23 @@ public partial class MainWindow : Window
             "record_upload" or "voice_chain" or "recorder" => "音频输入",
             "config" or "settings" => "配置读取",
             _ => "未知阶段",
+        };
+    }
+
+    /// <summary>
+    /// 结构化阶段失败时桌宠上显示的短状态，与详细错误（ResultLabel）区分。
+    /// </summary>
+    private static string BuildFailureStatus(string? step)
+    {
+        return NormalizeStep(step) switch
+        {
+            "stt" => "识别失败",
+            "llm" => "回复失败",
+            "tts" => "合成失败",
+            "playback" => "播放失败",
+            "config" or "settings" => "配置失败",
+            "record_upload" or "voice_chain" or "recorder" => "输入失败",
+            _ => "链路失败",
         };
     }
 
@@ -534,28 +612,21 @@ public partial class MainWindow : Window
     {
         try
         {
-            var projectRoot = AppDomain.CurrentDomain.BaseDirectory;
-            while (!string.IsNullOrEmpty(projectRoot) && !File.Exists(Path.Combine(projectRoot, "AGENTS.md")))
-            {
-                var parent = Directory.GetParent(projectRoot);
-                if (parent == null) break;
-                projectRoot = parent.FullName;
-            }
-            var settingsPath = Path.Combine(projectRoot, "data", "config", "app_settings.json");
+            // 复用 PythonBackendService 已有的项目根目录查找
+            var settingsPath = Path.Combine(_python.GetProjectRoot(), "data", "config", "app_settings.json");
             if (!File.Exists(settingsPath)) return 1.0f;
 
             var json = File.ReadAllText(settingsPath);
-            using var doc = System.Text.Json.JsonDocument.Parse(json);
-            var profiles = doc.RootElement.GetProperty("profiles");
-            if (profiles.GetArrayLength() == 0) return 1.0f;
+            var settings = JsonSerializer.Deserialize<AppSettings>(json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (settings == null) return 1.0f;
 
-            var profile = profiles[0];
-            if (!profile.TryGetProperty("desktop", out var desktop)) return 1.0f;
-            if (!desktop.TryGetProperty("audio", out var audio)) return 1.0f;
-            if (!audio.TryGetProperty("voice_volume", out var vol)) return 1.0f;
+            // 按 active_profile_id 定位 profile，而非硬编码 profiles[0]
+            var profile = settings.Profiles.FirstOrDefault(p => p.ProfileId == settings.ActiveProfileId);
+            if (profile == null) return 1.0f;
 
-            var value = vol.GetDouble();
-            return value is >= 0.1 and <= 2.0 ? (float)value : 1.0f;
+            var savedVolume = profile.Desktop?.ResolveVoiceVolume();
+            return savedVolume is >= 0.1 and <= 2.0 ? (float)savedVolume.Value : 1.0f;
         }
         catch
         {

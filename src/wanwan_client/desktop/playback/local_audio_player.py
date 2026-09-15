@@ -89,3 +89,19 @@ class LocalAudioPlayer:
             "error_code": error_code,
             "error_message": error_message,
         }
+
+    def stop(self) -> dict[str, object]:
+        """停止 winsound 当前异步或同步播放，供用户插话时安全中断。"""
+        try:
+            winsound.PlaySound(None, 0)
+            return {
+                "stopped": True,
+                "error_code": None,
+                "error_message": None,
+            }
+        except RuntimeError as error:
+            return {
+                "stopped": False,
+                "error_code": "PET_PLAYBACK_STOP_FAILED",
+                "error_message": f"winsound.PlaySound stop failed: {error}",
+            }

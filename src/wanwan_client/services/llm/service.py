@@ -12,17 +12,19 @@ from typing import Any
 import requests
 
 from src.wanwan_client.core.config.runtime_config import RuntimeConfig
-from src.wanwan_client.services.llm.providers import OpenAICompatibleLlmProvider
+from src.wanwan_client.services.llm.providers import BaseLlmProvider, LlmProviderRegistry
 
 
 class LlmService:
     def __init__(
         self,
         runtime_config: RuntimeConfig,
-        llm_provider: OpenAICompatibleLlmProvider | None = None,
+        llm_provider: BaseLlmProvider | None = None,
+        provider_registry: LlmProviderRegistry | None = None,
     ) -> None:
         self.runtime_config = runtime_config
-        self.llm_provider = llm_provider or OpenAICompatibleLlmProvider()
+        self.llm_provider = llm_provider
+        self.provider_registry = provider_registry or LlmProviderRegistry()
 
     def generate_reply(
         self,
@@ -49,7 +51,8 @@ class LlmService:
                 provider_config=provider_config,
                 model_config=model_config,
             )
-            result = self.llm_provider.generate_reply(
+            provider = self.llm_provider or self.provider_registry.resolve(provider_config)
+            result = provider.generate_reply(
                 messages=messages,
                 provider_config=provider_config,
                 model_config=model_config,
@@ -95,7 +98,7 @@ class LlmService:
                     "capabilities": list(model_config.capabilities or provider_config.capabilities),
                     "content_type": "text/plain",
                     "protocol_version": "v0.3",
-                    "adapter_version": self.llm_provider.ADAPTER_VERSION,
+                    "adapter_version": provider.ADAPTER_VERSION,
                     "duration_ms": self._duration_ms(started_at),
                     "request_id": result.get("request_id"),
                     "usage": result.get("raw_usage"),
