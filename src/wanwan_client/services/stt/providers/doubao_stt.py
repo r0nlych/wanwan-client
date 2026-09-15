@@ -174,13 +174,23 @@ class _DoubaoSttProviderMixin:
         request_id: str | None,
         response_json: dict[str, Any],
     ) -> SttProviderResult:
-        result = response_json.get("result", {})
+        result = response_json.get("result")
+        # result 对象本身缺失/类型错误才是协议结构问题；
+        # result 存在但 text 为空属于“没有识别到语音”，语义必须与结构错误区分
+        if not isinstance(result, dict):
+            raise SttProviderError(
+                "Doubao STT response missing result object.",
+                code="STT_SCHEMA_MISMATCH",
+                error_type="schema_mismatch",
+                retryable=False,
+            )
+
         text = str(result.get("text", "")).strip()
         if not text:
             raise SttProviderError(
-                "Doubao STT response missing result.text",
-                code="STT_SCHEMA_MISMATCH",
-                error_type="schema_mismatch",
+                "Doubao STT returned no recognized text; no speech detected.",
+                code="STT_NO_SPEECH",
+                error_type="no_speech",
                 retryable=False,
             )
 

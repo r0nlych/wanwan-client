@@ -191,6 +191,32 @@ public partial class MainWindow : Window
 
         try
         {
+            // 发送前本地静音检测：纯静音不调用 STT，省一次 API 请求并给出更快反馈
+            var silence = AudioSilenceDetector.Analyze(audioPath);
+            if (!string.IsNullOrEmpty(silence.Error))
+            {
+                // 检测自身失败时放行，只记录警告，不阻塞正常链路
+                _log.Warn("silence_check.error", "静音检测失败，放行继续发送",
+                    new() { ["error"] = silence.Error, ["audio_path"] = audioPath });
+            }
+            else if (silence.IsSilent)
+            {
+                SetStatus("没有听到声音");
+                SetResult("");
+                _log.Info("voice_chain.silence_blocked", "检测到静音，未发送 STT 请求",
+                    new()
+                    {
+                        ["audio_path"] = audioPath,
+                        ["duration_seconds"] = Math.Round(silence.DurationSeconds, 1),
+                        ["peak"] = silence.Peak,
+                        ["max_window_rms"] = silence.MaxWindowRms,
+                    });
+                MessageBox.Show(
+                    "没有听到声音，请靠近麦克风再说一次。",
+                    "晚晚", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
             // 当前 IPC 只有一次最终结果，无法确认 STT/LLM/TTS 实时阶段，
             // 等待期间统一显示“处理中”，不伪造 TRANSCRIBING/THINKING/SPEAKING
             var outcome = await _python.RunVoiceChainAsync(audioPath);
@@ -217,6 +243,21 @@ public partial class MainWindow : Window
                     // 结构化阶段失败：Python 正常返回，但 STT/LLM/TTS 等某阶段失败
                     var failedResult = outcome.Result;
                     var failedStep = ResolveFailedStep(failedResult);
+                    var errorCode = ResolveErrorCode(failedResult);
+
+                    // “没听清”是可恢复的输入问题，与系统故障区分开
+                    if (ContainsAny(errorCode, "NO_SPEECH"))
+                    {
+                        SetStatus("没有听到声音");
+                        SetResult("没有听清，请靠近麦克风再说一次");
+                        _log.Warn("voice_chain.no_speech", "STT 未识别到语音内容",
+                            new() { ["trace_id"] = failedResult.TraceId, ["step"] = failedStep });
+                        MessageBox.Show(
+                            "没有听清，请靠近麦克风再说一次。",
+                            "晚晚", MessageBoxButton.OK, MessageBoxImage.Information);
+                        return;
+                    }
+
                     var failureMessage = BuildVoiceChainFailureMessage(failedResult);
 
                     SetStatus(BuildFailureStatus(failedStep));
@@ -227,6 +268,7 @@ public partial class MainWindow : Window
                             ["failure"] = failureMessage,
                             ["trace_id"] = failedResult.TraceId,
                             ["step"] = failedStep,
+                            ["error_code"] = errorCode,
                             ["step_display"] = GetStepDisplayName(failedStep),
                         });
                 }
@@ -379,6 +421,29 @@ public partial class MainWindow : Window
         }
 
         return NormalizeStep(result.Step);
+    }
+
+    /// <summary>
+    /// 与失败阶段定位相同的查找顺序：final.failed_stage → stages 中第一个 failed。
+    /// </summary>
+    private static string ResolveErrorCode(VoiceChainResult? result)
+    {
+        if (result == null)
+            return "";
+
+        var directCode = result.Final?.FailedStage?.Error?.Code;
+        if (!string.IsNullOrWhiteSpace(directCode))
+            return directCode;
+
+        foreach (var stage in result.Stages ?? Enumerable.Empty<VoiceChainStage>())
+        {
+            if (!string.Equals(stage.Status, "failed", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (!string.IsNullOrWhiteSpace(stage.Error?.Code))
+                return stage.Error.Code;
+        }
+
+        return "";
     }
 
     private static string BuildFailureTitle(string? step, VoiceChainError? error)
