@@ -184,13 +184,31 @@ class LlmService:
             }
 
         if isinstance(error, requests.HTTPError):
+            # 注意：不能写成 `if error.response`。requests.Response 的 __bool__ 等于 self.ok，
+            # 4xx/5xx 会返回 False，用真值判断会永远取不到状态码（旧实现 status_code 恒为 None）。
+            status_code = error.response.status_code if error.response is not None else None
+
+            # 401/403 属于鉴权类失败：单独归类，上层凭 AUTH 直接引导到设置页。
+            # 只取 status_code，不解析第三方响应正文，也不记录请求头。
+            if status_code in (401, 403):
+                return {
+                    "code": "LLM_AUTH_ERROR",
+                    "message": str(error),
+                    "type": "authentication_error",
+                    "retryable": False,
+                    "details": {
+                        "status_code": status_code,
+                    },
+                    "raw_ref": None,
+                }
+
             return {
                 "code": "LLM_PROVIDER_ERROR",
                 "message": str(error),
                 "type": "provider_error",
                 "retryable": False,
                 "details": {
-                    "status_code": error.response.status_code if error.response else None,
+                    "status_code": status_code,
                 },
                 "raw_ref": None,
             }

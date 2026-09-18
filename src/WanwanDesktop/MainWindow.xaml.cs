@@ -494,7 +494,11 @@ public partial class MainWindow : Window
         if (!IsErrorActionCurrent(RecoverableAction.OpenSettings))
             return;
 
+        // 打开设置前先把错误态整体收干净，避免设置窗口关掉后主窗口还挂着旧错误
         ClearErrorActions();
+        // 气泡正文和 ToolTip 也一起清掉，否则会残留上一轮的原始错误信息
+        SetResult("");
+        ApplyUiState(WanwanCharacterState.Idle);
         _log.Info("error.open_settings", "用户从错误提示打开设置");
         OpenSettingsWindow();
     }

@@ -69,7 +69,7 @@ python -m pytest -q -p no:cacheprovider
 dotnet build src\WanwanDesktop\WanwanDesktop.csproj --no-restore
 ```
 
-当前回归基线：Python 36 项测试通过，WPF 构建 0 警告、0 错误。
+当前回归基线：Python 44 项测试通过，WPF 构建 0 警告、0 错误。
 
 ## 接口约定
 
