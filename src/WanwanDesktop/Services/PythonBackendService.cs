@@ -40,10 +40,29 @@ public sealed class VoiceChainInvokeResult
         new() { FailureCode = code, FailureMessage = message };
 }
 
+/// <summary>
+/// 文本音频链子进程调用结果。
+/// Result 非空表示 Python 返回了可解析的 v0.3 结构；Result 为空表示进程或传输层失败。
+/// </summary>
+public sealed class TextAudioInvokeResult
+{
+    public TextAudioResult? Result { get; init; }
+    public string? FailureCode { get; init; }
+    public string? FailureMessage { get; init; }
+
+    public bool IsSuccess => Result is { Status: "success" };
+
+    public static TextAudioInvokeResult Ok(TextAudioResult result) => new() { Result = result };
+
+    public static TextAudioInvokeResult TransportFailure(string code, string message) =>
+        new() { FailureCode = code, FailureMessage = message };
+}
+
 public class PythonBackendService
 {
     // 语音链路包含 STT + LLM + TTS 三段网络调用，deepseek-reasoner 偶发较慢，超时给到 180 秒
     private const int VoiceChainTimeoutSeconds = 180;
+    private const int TextAudioTimeoutSeconds = 180;
 
     private readonly DesktopLogService _log;
     private readonly string _projectRoot;
@@ -171,6 +190,135 @@ public class PythonBackendService
     }
 
     public string GetProjectRoot() => _projectRoot;
+
+    /// <summary>
+    /// 调用现有 TextAudioPipeline：文本进入 LLM 和 TTS，但跳过 Python 本地播放。
+    /// 用户文本通过 ArgumentList 独立传递，中文、引号、空格和多行内容不会被命令行拼接破坏。
+    /// </summary>
+    public async Task<TextAudioInvokeResult> RunTextAudioAsync(
+        string text,
+        string sessionId,
+        bool includeHistory)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return TextAudioInvokeResult.TransportFailure("EMPTY_TEXT", "请输入要发送的内容");
+        }
+
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return TextAudioInvokeResult.TransportFailure(
+                "EMPTY_SESSION_ID",
+                "当前会话标识无效，请新建会话后重试");
+        }
+
+        _log.Info("text_audio.start", "开始调用 Python 文本音频链路",
+            new()
+            {
+                ["text_length"] = text.Length,
+                ["session_id"] = sessionId,
+                ["include_history"] = includeHistory,
+                ["python_path"] = _pythonPath,
+            });
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = _pythonPath,
+            WorkingDirectory = _projectRoot,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+
+        // 不使用 Arguments 字符串拼接，避免用户输入中的引号或换行改变参数边界。
+        startInfo.ArgumentList.Add("-m");
+        startInfo.ArgumentList.Add("src.wanwan_client.main");
+        startInfo.ArgumentList.Add("run-text-audio");
+        startInfo.ArgumentList.Add(text);
+        startInfo.ArgumentList.Add("--session-id");
+        startInfo.ArgumentList.Add(sessionId);
+        startInfo.ArgumentList.Add("--no-play");
+        if (includeHistory)
+            startInfo.ArgumentList.Add("--include-history");
+
+        using var process = new Process { StartInfo = startInfo };
+        var stdoutBuilder = new StringBuilder();
+        var stderrBuilder = new StringBuilder();
+
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data != null) stdoutBuilder.AppendLine(e.Data);
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data != null) stderrBuilder.AppendLine(e.Data);
+        };
+
+        try
+        {
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            using var timeoutCts = new CancellationTokenSource(
+                TimeSpan.FromSeconds(TextAudioTimeoutSeconds));
+            try
+            {
+                await process.WaitForExitAsync(timeoutCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                _log.Error("text_audio.timeout", "文本音频链路超时，已终止 Python 进程",
+                    new() { ["timeout_seconds"] = TextAudioTimeoutSeconds });
+                return TextAudioInvokeResult.TransportFailure(
+                    "TIMEOUT",
+                    $"文本处理超时（{TextAudioTimeoutSeconds} 秒），请检查网络后重试");
+            }
+
+            var stdout = stdoutBuilder.ToString().Trim();
+            var stderr = stderrBuilder.ToString().Trim();
+
+            if (!string.IsNullOrEmpty(stderr))
+            {
+                _log.Warn("text_audio.stderr", "文本音频链路产生 stderr",
+                    new() { ["stderr"] = TruncateForLog(stderr, 1000), ["exit_code"] = process.ExitCode });
+            }
+
+            var result = TryParseTextAudioResult(stdout);
+            if (result == null)
+            {
+                var code = string.IsNullOrWhiteSpace(stdout) ? "NO_OUTPUT" : "INVALID_JSON";
+                var message = code == "NO_OUTPUT"
+                    ? "Python 文本链路没有返回内容，请检查 Python 环境与依赖"
+                    : "Python 文本链路返回内容无法解析，请查看日志";
+                return TextAudioInvokeResult.TransportFailure(code, message);
+            }
+
+            _log.Info("text_audio.result",
+                process.ExitCode == 0 ? "Python 文本音频链路返回成功" : "Python 文本音频链路返回结构化失败",
+                new()
+                {
+                    ["status"] = result.Status,
+                    ["trace_id"] = result.TraceId,
+                    ["reply_text_non_empty"] = !string.IsNullOrWhiteSpace(result.Final?.ReplyText),
+                    ["exit_code"] = process.ExitCode,
+                });
+
+            return TextAudioInvokeResult.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _log.Error("text_audio.exception", "调用 Python 文本音频链路异常",
+                new() { ["error"] = ex.Message, ["stack_trace"] = ex.StackTrace });
+            return TextAudioInvokeResult.TransportFailure(
+                "PROCESS_EXCEPTION",
+                $"调用 Python 文本链路时发生异常：{ex.Message}");
+        }
+    }
 
     public async Task<TtsTestResult> RunTtsTestAsync(string testText)
     {
@@ -446,6 +594,41 @@ public class PythonBackendService
         {
             _log.Error("python.result", "JSON 解析失败",
                 new() { ["error"] = ex.Message, ["stdout_preview"] = stdout.Length > 1000 ? stdout[..1000] : stdout });
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 文本链路使用独立模型解析，避免把没有 STT 字段的结果硬塞进 VoiceChainResult。
+    /// </summary>
+    private TextAudioResult? TryParseTextAudioResult(string stdout)
+    {
+        if (string.IsNullOrWhiteSpace(stdout))
+        {
+            _log.Error("text_audio.result", "stdout 为空，无法解析文本音频结果");
+            return null;
+        }
+
+        try
+        {
+            var result = JsonSerializer.Deserialize<TextAudioResult>(stdout);
+            if (result == null)
+            {
+                _log.Error("text_audio.result", "文本音频 JSON 解析结果为 null",
+                    new() { ["stdout_length"] = stdout.Length });
+                return null;
+            }
+
+            return result;
+        }
+        catch (JsonException ex)
+        {
+            _log.Error("text_audio.result", "文本音频 JSON 解析失败",
+                new()
+                {
+                    ["error"] = ex.Message,
+                    ["stdout_preview"] = TruncateForLog(stdout, 1000),
+                });
             return null;
         }
     }

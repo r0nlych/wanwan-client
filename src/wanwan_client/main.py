@@ -9,6 +9,7 @@ from src.wanwan_client.desktop.controllers.voice_chain_controller import VoiceCh
 from src.wanwan_client.desktop.playback import LocalAudioPlayer
 from src.wanwan_client.services.llm import LlmService
 from src.wanwan_client.services.stt import SttService
+from src.wanwan_client.services.storage import ConversationStore
 from src.wanwan_client.services.tts import TtsService
 
 
@@ -43,6 +44,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--session-id",
         dest="session_id",
         help="Optional session id for the current run.",
+    )
+    run_text_audio_parser.add_argument(
+        "--no-play",
+        action="store_true",
+        default=False,
+        help="Skip Python-side playback. The desktop client will play the generated audio.",
+    )
+    run_text_audio_parser.add_argument(
+        "--include-history",
+        action="store_true",
+        default=False,
+        help="Include recent messages from the explicitly provided session id.",
     )
 
     run_llm_text_parser = subparsers.add_parser(
@@ -208,7 +221,21 @@ def main():
         if args.command == "run-text-audio":
             state = app.load_state()
             pipeline = TextAudioPipeline(runtime_config=state.runtime_config)
-            result = pipeline.run(user_text=args.text, session_id=args.session_id)
+            # 历史内容只有在调用方显式传 --include-history 时才会读取并发往 LLM。
+            # 未提供 session_id 时即使误传开关也保持无状态，避免跨会话误加载。
+            history_messages = (
+                ConversationStore.load_session_messages(args.session_id)
+                if args.include_history and args.session_id
+                else []
+            )
+            result = pipeline.run(
+                user_text=args.text,
+                session_id=args.session_id,
+                skip_playback=args.no_play,
+                history_messages=history_messages,
+            )
+            # 文本和语音共用同一份本地会话记录，历史页无需维护两套数据源。
+            result["conversation_save"] = ConversationStore.save(result)
             print_json(result)
             if result["status"] != "success":
                 raise SystemExit(1)

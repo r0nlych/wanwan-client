@@ -25,6 +25,8 @@ class TextAudioPipeline:
     """
 
     PROTOCOL_VERSION = "v0.3"
+    MAX_CONTEXT_TURNS = 6
+    MAX_CONTEXT_CHARACTERS = 12_000
 
     def __init__(
         self,
@@ -42,17 +44,23 @@ class TextAudioPipeline:
         self.tts_provider_registry = tts_provider_registry or TtsProviderRegistry()
         self.audio_player = audio_player or LocalAudioPlayer()
 
-    def run(self, user_text: str, session_id: str | None = None) -> dict[str, Any]:
+    def run(
+        self,
+        user_text: str,
+        session_id: str | None = None,
+        skip_playback: bool = False,
+        history_messages: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         trace_id = self._build_trace_id()
         resolved_session_id = session_id or self._build_session_id()
         stages: list[dict[str, Any]] = []
 
-        messages = [
-            {
-                "role": "user",
-                "content": user_text,
-            }
-        ]
+        # 历史由调用方在获得明确授权后提供；Pipeline 再做角色和大小防御。
+        # 当前用户消息始终最后追加，避免历史数据覆盖本轮输入。
+        messages = self._build_messages(
+            user_text=user_text,
+            history_messages=history_messages,
+        )
 
         llm_started = perf_counter()
         try:
@@ -116,7 +124,7 @@ class TextAudioPipeline:
                     error=error,
                 )
             )
-            return self._build_pipeline_result(trace_id, resolved_session_id, stages)
+            return self._build_pipeline_result(trace_id, resolved_session_id, stages, user_text)
 
         tts_started = perf_counter()
         try:
@@ -176,7 +184,43 @@ class TextAudioPipeline:
                     error=error,
                 )
             )
-            return self._build_pipeline_result(trace_id, resolved_session_id, stages)
+            return self._build_pipeline_result(trace_id, resolved_session_id, stages, user_text)
+
+        # WPF 主界面需要自己控制播放、停止按钮和音量，因此允许 Python 只生成音频。
+        # 默认仍由 Python 播放，保证现有 CLI 调用和测试保持兼容。
+        if skip_playback:
+            stages.append(
+                self._build_stage_result(
+                    trace_id=trace_id,
+                    session_id=resolved_session_id,
+                    step="playback",
+                    status="skipped",
+                    payload={
+                        "input": {},
+                        "output": {
+                            "skipped": True,
+                            "reason": "client_playback",
+                        },
+                        "refs": {
+                            "audio_ref": tts_result.audio_ref,
+                        },
+                        "options": {
+                            "autoplay": False,
+                            "volume": self.runtime_config.active_profile.desktop.volume,
+                        },
+                    },
+                    meta={
+                        "provider": "client_playback",
+                        "model": None,
+                        "capabilities": ["audio_out"],
+                        "content_type": tts_result.audio_ref["mime_type"],
+                        "protocol_version": self.PROTOCOL_VERSION,
+                        "adapter_version": "phase6.playback.skipped.v1",
+                        "duration_ms": 0,
+                    },
+                )
+            )
+            return self._build_pipeline_result(trace_id, resolved_session_id, stages, user_text)
 
         playback_started = perf_counter()
         try:
@@ -220,13 +264,14 @@ class TextAudioPipeline:
                 )
             )
 
-        return self._build_pipeline_result(trace_id, resolved_session_id, stages)
+        return self._build_pipeline_result(trace_id, resolved_session_id, stages, user_text)
 
     def _build_pipeline_result(
         self,
         trace_id: str,
         session_id: str,
         stages: list[dict[str, Any]],
+        user_text: str,
     ) -> dict[str, Any]:
         final_status = "success"
         for s in stages:
@@ -247,10 +292,57 @@ class TextAudioPipeline:
             "status": final_status,
             "stages": stages,
             "final": {
+                # 历史记录需要保留用户原文；这也让失败链路不依赖阶段 payload 才能还原输入。
+                "user_text": user_text,
                 "reply_text": last_successful_reply,
                 "audio_ref": last_audio_ref,
             },
         }
+
+    def _build_messages(
+        self,
+        *,
+        user_text: str,
+        history_messages: list[dict[str, Any]] | None,
+    ) -> list[dict[str, str]]:
+        """清洗历史消息、限制大小，并最终追加本轮用户输入。"""
+        sanitized_turns: list[tuple[str, str]] = []
+        pending_user: str | None = None
+        for message in history_messages or []:
+            if not isinstance(message, dict):
+                continue
+            role = message.get("role")
+            content = message.get("content")
+            if role not in {"user", "assistant"}:
+                continue
+            if not isinstance(content, str) or not content.strip():
+                continue
+            normalized_content = content.strip()
+            if role == "user":
+                pending_user = normalized_content
+                continue
+            if role == "assistant" and pending_user is not None:
+                sanitized_turns.append((pending_user, normalized_content))
+                pending_user = None
+
+        # 只接受完整的 user/assistant 轮次；即使调用方传入异常列表也限制为6轮和12000字符。
+        selected_reversed: list[tuple[str, str]] = []
+        used_characters = 0
+        for history_user, history_assistant in reversed(
+            sanitized_turns[-self.MAX_CONTEXT_TURNS :]
+        ):
+            turn_characters = len(history_user) + len(history_assistant)
+            if used_characters + turn_characters > self.MAX_CONTEXT_CHARACTERS:
+                break
+            selected_reversed.append((history_user, history_assistant))
+            used_characters += turn_characters
+
+        messages: list[dict[str, str]] = []
+        for history_user, history_assistant in reversed(selected_reversed):
+            messages.append({"role": "user", "content": history_user})
+            messages.append({"role": "assistant", "content": history_assistant})
+        messages.append({"role": "user", "content": user_text})
+        return messages
 
     def _build_stage_result(
         self,

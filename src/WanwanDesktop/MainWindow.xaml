@@ -3,14 +3,18 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None"
         AllowsTransparency="True"
-        Background="Transparent"
+        Background="{x:Null}"
         Topmost="True"
-        Width="160" Height="160"
+        Width="260" Height="300"
         Left="80" Top="80"
         MouseLeftButtonDown="Window_MouseLeftButtonDown"
         ResizeMode="NoResize"
-        ShowInTaskbar="True">
+        ShowInTaskbar="True"
+        FontFamily="Microsoft YaHei UI"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
 
+    <!-- 右键菜单：与改版前完全一致，事件绑定不改 -->
     <Window.ContextMenu>
         <ContextMenu>
             <MenuItem Header="开始录音" Click="StartRecord_Click"/>
@@ -18,6 +22,12 @@
             <MenuItem Header="取消录音" Click="CancelRecord_Click"/>
             <Separator/>
             <MenuItem Header="选择音频并运行" Click="ChooseAudio_Click"/>
+            <Separator/>
+            <MenuItem Header="新建文本会话" Click="NewTextSession_Click"/>
+            <MenuItem x:Name="ContinuousContextMenuItem"
+                      Header="启用连续对话（最近 6 轮）"
+                      IsCheckable="True"
+                      Click="ContinuousContextMenuItem_Click"/>
             <Separator/>
             <MenuItem Header="打开设置" Click="OpenSettings_Click"/>
             <MenuItem Header="打开日志窗口" Click="OpenLogWindow_Click"/>
@@ -27,32 +37,510 @@
         </ContextMenu>
     </Window.ContextMenu>
 
-    <Canvas Width="160" Height="160">
-        <Ellipse Canvas.Left="18" Canvas.Top="28" Width="124" Height="124"
-                 Fill="#FFF7F0" Stroke="#3F2D2D" StrokeThickness="3"/>
-        <Polygon Points="42,30 56,6 74,34" Fill="#FFF7F0" Stroke="#3F2D2D" StrokeThickness="3"/>
-        <Polygon Points="118,30 104,6 86,34" Fill="#FFF7F0" Stroke="#3F2D2D" StrokeThickness="3"/>
-        <Ellipse Canvas.Left="52" Canvas.Top="68" Width="14" Height="18" Fill="#2C2230"/>
-        <Ellipse Canvas.Left="94" Canvas.Top="68" Width="14" Height="18" Fill="#2C2230"/>
-        <Ellipse Canvas.Left="58" Canvas.Top="74" Width="4" Height="4" Fill="White"/>
-        <Ellipse Canvas.Left="100" Canvas.Top="74" Width="4" Height="4" Fill="White"/>
-        <Ellipse Canvas.Left="72" Canvas.Top="96" Width="16" Height="12"
-                 Fill="#FFB3C1" Stroke="#3F2D2D" StrokeThickness="2"/>
-        <Path Stroke="#3F2D2D" StrokeThickness="3" Data="M 62,108 Q 80,130 98,108"/>
-        <Ellipse Canvas.Left="28" Canvas.Top="96" Width="22" Height="22" Fill="#FFD5DF"/>
-        <Ellipse Canvas.Left="110" Canvas.Top="96" Width="22" Height="22" Fill="#FFD5DF"/>
-        <TextBlock x:Name="PetLabel" Canvas.Left="62" Canvas.Top="138"
-                   Text="晚晚" Foreground="#6B4E71"
-                   FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="Bold"
-                   TextAlignment="Center" Width="36"/>
-        <TextBlock x:Name="StatusLabel" Canvas.Left="50" Canvas.Top="18"
-                   Text="待命" Foreground="#3F2D2D"
-                   FontFamily="Microsoft YaHei UI" FontSize="10" FontWeight="Bold"
-                   TextAlignment="Center" Width="60"/>
-        <TextBlock x:Name="ResultLabel" Canvas.Left="10" Canvas.Top="140"
-                   Text="" Foreground="#3F2D2D"
-                   FontFamily="Microsoft YaHei UI" FontSize="8"
-                   TextAlignment="Center" Width="140"
-                   TextWrapping="Wrap" MaxHeight="20"/>
-    </Canvas>
+    <!--
+        Window.Resources：本文件的全部视觉样式集中在这里。
+        颜色严格取自原型图「颜色与字体」面板：
+        主操作 #3B82F6 / 成功在线 #22C55E / 录音警示 #F97316 / 错误 #EF4444
+        文字主 #1F2937 / 文字次 #6B7280 / 卡片 85% 白 / 边框 #E5E7EB
+        之所以放在窗口级而不是独立资源字典，是因为本阶段只有主窗口在用，
+        等多窗口都需要时再抽出去，避免现在就引入一个空壳主题系统。
+    -->
+    <Window.Resources>
+
+        <!-- ============ 调色板 ============ -->
+        <SolidColorBrush x:Key="PrimaryBrush" Color="#FF3B82F6"/>
+        <SolidColorBrush x:Key="PrimaryHoverBrush" Color="#FF2F74E0"/>
+        <SolidColorBrush x:Key="PrimaryPressedBrush" Color="#FF2563C9"/>
+        <SolidColorBrush x:Key="SuccessBrush" Color="#FF22C55E"/>
+        <SolidColorBrush x:Key="WarningBrush" Color="#FFF97316"/>
+        <SolidColorBrush x:Key="ErrorBrush" Color="#FFEF4444"/>
+        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FF1F2937"/>
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#FF6B7280"/>
+        <SolidColorBrush x:Key="CardBrush" Color="#D9FFFFFF"/>
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFFFF"/>
+        <SolidColorBrush x:Key="SoftBorderBrush" Color="#FFE5E7EB"/>
+        <SolidColorBrush x:Key="InputSurfaceBrush" Color="#FFF3F4F6"/>
+        <SolidColorBrush x:Key="IconSurfaceBrush" Color="#FFF3F4F6"/>
+        <SolidColorBrush x:Key="IconSurfaceHoverBrush" Color="#FFE5E7EB"/>
+        <SolidColorBrush x:Key="DisabledBackgroundBrush" Color="#FFE5E7EB"/>
+        <SolidColorBrush x:Key="DisabledForegroundBrush" Color="#FF9CA3AF"/>
+
+        <!-- ============ 对话气泡（白卡，圆角 16，最大宽 300） ============ -->
+        <Style x:Key="BubbleBorderStyle" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource CardBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource SoftBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="MaxWidth" Value="300"/>
+        </Style>
+
+        <!-- ============ 状态 Chip（白胶囊：彩色圆点 + 短状态） ============ -->
+        <Style x:Key="ChipBorderStyle" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource SoftBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- ============ 输入面板（85% 白卡，圆角 20，宽度 400） ============ -->
+        <Style x:Key="PanelBorderStyle" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource CardBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource SoftBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="20"/>
+            <Setter Property="Padding" Value="12"/>
+            <Setter Property="MaxWidth" Value="400"/>
+        </Style>
+
+        <!-- ============ 多行输入框容器（浅灰、圆角 12、最小高 88） ============ -->
+        <Style x:Key="InputSurfaceStyle" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource InputSurfaceBrush}"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="10"/>
+            <Setter Property="MinHeight" Value="88"/>
+        </Style>
+
+        <!--
+            圆角按钮的公共模板：三类按钮（主操作 / 图标 / 药丸）共用同一套视觉逻辑，
+            差异只在背景色和尺寸上，避免写三份重复模板。
+        -->
+        <ControlTemplate x:Key="RoundButtonTemplate" TargetType="Button">
+            <Border x:Name="Bg"
+                    Background="{TemplateBinding Background}"
+                    CornerRadius="20"
+                    SnapsToDevicePixels="True">
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Bg" Property="Background" Value="{StaticResource IconSurfaceHoverBrush}"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter TargetName="Bg" Property="Opacity" Value="0.75"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <!-- 图标按钮：40×40 命中区，浅灰底 -->
+        <Style x:Key="IconButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Background" Value="{StaticResource IconSurfaceBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template" Value="{StaticResource RoundButtonTemplate}"/>
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="{StaticResource DisabledForegroundBrush}"/>
+                    <Setter Property="Background" Value="{StaticResource DisabledBackgroundBrush}"/>
+                    <Setter Property="Cursor" Value="Arrow"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 药丸按钮（历史 / 展开入口）：图标 + 文字，高 40 -->
+        <Style x:Key="PillButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="MinWidth" Value="88"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Background" Value="{StaticResource IconSurfaceBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template" Value="{StaticResource RoundButtonTemplate}"/>
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="{StaticResource DisabledForegroundBrush}"/>
+                    <Setter Property="Background" Value="{StaticResource DisabledBackgroundBrush}"/>
+                    <Setter Property="Cursor" Value="Arrow"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!--
+            气泡内错误操作按钮：比药丸按钮更紧凑（高 32），
+            白底 + 细边框，保证叠在桌面上仍然可读。
+            可见性由 ShowRecoverableError 统一控制，这里不写触发器。
+        -->
+        <Style x:Key="ErrorActionButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="MinWidth" Value="84"/>
+            <Setter Property="Margin" Value="4,0"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource SoftBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="16"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource IconSurfaceHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bg" Property="Opacity" Value="0.75"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 主操作按钮（发送）：蓝色药丸 -->
+        <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="MinWidth" Value="88"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="20"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource PrimaryHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource PrimaryPressedBrush}"/>
+                            </Trigger>
+                            <!-- 未接线按钮一律禁用显示，不伪装成可用状态 -->
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource DisabledBackgroundBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource DisabledForegroundBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--
+            主操作圆按钮（麦克风 / 停止）：40×40 实心圆。
+            它的颜色与图标由 ApplyUiState 统一设置（空闲蓝麦克风 → 录音红停止 → 播放蓝停止 → 处理中置灰），
+            因此这里不写 IsEnabled 触发器，避免本地值与触发器打架。
+        -->
+        <Style x:Key="PrimaryRoundButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="20"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bg" Property="Opacity" Value="0.72"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 图标字形（Segoe MDL2 Assets 是 Windows 自带字体，不引第三方图标库） -->
+        <Style x:Key="GlyphTextStyle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- 按钮内文字（与图标并排时使用） -->
+        <Style x:Key="ButtonTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- 输入区辅助文字（快捷键提示 / 字数）12px -->
+        <Style x:Key="HintTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+    </Window.Resources>
+
+    <!--
+        整体结构（自上而下）：
+        对话气泡(+尾巴) → 桌宠角色 + 紧贴底部的状态 Chip → 输入面板 → 展开入口
+
+        窗口根区域不画任何背景（Window.Background = null），角色直接悬浮在桌面上：
+        全窗只有三处有独立背景 —— 气泡、Chip、展开后的输入面板。
+        全部用 Grid 行定义撑开，不写死 Canvas 坐标，125% / 150% 缩放时由 WPF 按 DIP 换算。
+    -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>  <!-- 0 对话气泡 -->
+            <RowDefinition Height="*"/>     <!-- 1 桌宠角色 + 紧贴底部的状态 Chip（占剩余空间并居中） -->
+            <RowDefinition Height="Auto"/>  <!-- 2 输入面板（默认收起） -->
+            <RowDefinition Height="Auto"/>  <!-- 3 展开入口（展开时隐藏） -->
+        </Grid.RowDefinitions>
+
+        <!--
+            ===== 0. 对话气泡 =====
+            尾巴用 45° 旋转的同色小方块压在气泡下边缘，
+            因此宽度随文字自适应，不需要按气泡宽度硬算尾巴位置。
+            气泡整体为空文本时由代码收起 BubbleArea（不是只收起气泡本体）。
+        -->
+        <Grid x:Name="BubbleArea" Grid.Row="0" HorizontalAlignment="Center" Margin="0,0,0,4">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>  <!-- 气泡本体 + 尾巴（共用一层阴影） -->
+                <RowDefinition Height="Auto"/>  <!-- 错误操作区（默认收起） -->
+            </Grid.RowDefinitions>
+
+            <!-- 阴影只覆盖气泡本体与尾巴，避免错误按钮也被投影 -->
+            <Grid Grid.Row="0">
+                <Grid.Effect>
+                    <DropShadowEffect BlurRadius="10" ShadowDepth="1" Direction="270"
+                                      Opacity="0.15" Color="#FF000000"/>
+                </Grid.Effect>
+
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>  <!-- 气泡本体 -->
+                    <RowDefinition Height="Auto"/>  <!-- 下尾巴 -->
+                </Grid.RowDefinitions>
+
+                <Border x:Name="ResultBubble" Grid.Row="0" Style="{StaticResource BubbleBorderStyle}">
+                    <TextBlock x:Name="ResultLabel"
+                               Text="你好！有什么我可以帮你的吗？"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               FontSize="14" LineHeight="20"
+                               TextWrapping="Wrap" MaxHeight="40"
+                               TextTrimming="CharacterEllipsis"/>
+                </Border>
+
+                <Border Grid.Row="1" Width="12" Height="12"
+                        Background="{StaticResource CardBrush}"
+                        HorizontalAlignment="Left" Margin="24,-7,0,0"
+                        RenderTransformOrigin="0.5,0.5">
+                    <Border.RenderTransform>
+                        <RotateTransform Angle="45"/>
+                    </Border.RenderTransform>
+                </Border>
+            </Grid>
+
+            <!--
+                错误操作区：只在可恢复错误时出现。
+                三个按钮的可见性由 MainWindow 的 ShowRecoverableError 按错误类型分别设置，
+                不在这里用触发器或绑定做条件显示。
+            -->
+            <StackPanel x:Name="ErrorActionArea" Grid.Row="1"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Center"
+                        Margin="0,10,0,0"
+                        Visibility="Collapsed">
+                <Button x:Name="ErrorDismissButton" Content="我知道了"
+                        Style="{StaticResource ErrorActionButtonStyle}"
+                        Click="ErrorDismiss_Click"/>
+                <Button x:Name="ErrorRetryButton" Content="重试"
+                        Style="{StaticResource ErrorActionButtonStyle}"
+                        Click="ErrorRetry_Click"/>
+                <Button x:Name="ErrorSettingsButton" Content="打开设置"
+                        Style="{StaticResource ErrorActionButtonStyle}"
+                        Click="ErrorSettings_Click"/>
+            </StackPanel>
+        </Grid>
+
+        <!--
+            ===== 1. 桌宠角色 + 状态 Chip =====
+            角色与 Chip 放在同一个 StackPanel：Chip 永远贴着角色下方，
+            不会因为窗口从 260×300 展开到 420×520 而被拉开。
+            素材可见猫身约占画布 67% 宽 / 88% 高，上下各留有透明边，
+            因此 Chip 用负 margin 抵消底部透明边，才能做到“紧贴”。
+        -->
+        <StackPanel Grid.Row="1" VerticalAlignment="Center">
+            <Image x:Name="CharacterImage"
+                   Width="160" Height="160"
+                   Stretch="Uniform"
+                   RenderOptions.BitmapScalingMode="HighQuality"/>
+
+            <Border Style="{StaticResource ChipBorderStyle}" Margin="0,-8,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="{StaticResource SuccessBrush}"
+                             VerticalAlignment="Center"/>
+                    <TextBlock x:Name="StatusLabel"
+                               Text="空闲中"
+                               Margin="6,0,0,0"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               FontSize="12"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <!--
+            ===== 2. 输入面板 =====
+            输入框已接入真实文本链路；历史按钮展示最近的本地会话记录。
+            文本与语音共用状态和 WPF 播放入口，不伪造无法确认的细分阶段。
+        -->
+        <Border x:Name="InputPanel" Grid.Row="2" Style="{StaticResource PanelBorderStyle}"
+                Visibility="Collapsed" Margin="0,8,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>  <!-- 输入区（占位提示 / 快捷键 / 字数） -->
+                    <RowDefinition Height="Auto"/>  <!-- 底部按钮栏 -->
+                </Grid.RowDefinitions>
+
+                <!-- 输入区：浅灰圆角容器；占位提示是叠加的 TextBlock，不写进 TextBox.Text -->
+                <Border Grid.Row="0" Style="{StaticResource InputSurfaceStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>     <!-- 文本输入 + 占位提示 -->
+                            <RowDefinition Height="Auto"/>  <!-- 快捷键提示 + 字数 -->
+                        </Grid.RowDefinitions>
+
+                        <!-- 多行文本输入框：AcceptsReturn=True，回车与 Shift+Enter 都能换行 -->
+                        <TextBox x:Name="MessageInput"
+                                 Grid.Row="0"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Padding="0"
+                                 Foreground="{StaticResource TextPrimaryBrush}"
+                                 CaretBrush="{StaticResource TextPrimaryBrush}"
+                                 FontSize="14"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 MaxLength="2000"
+                                 MinHeight="48"
+                                 VerticalScrollBarVisibility="Auto"
+                                 TextChanged="MessageInput_TextChanged"
+                                 PreviewKeyDown="MessageInput_PreviewKeyDown"/>
+
+                        <!--
+                            占位提示：与 TextBox 同格叠放，IsHitTestVisible=False 保证点击穿透到输入框。
+                            只控制可见性，绝不写入 TextBox.Text，因此不会被当成真实输入提交。
+                        -->
+                        <TextBlock x:Name="PlaceholderLabel"
+                                   Grid.Row="0"
+                                   Text="输入你想说的话……"
+                                   IsHitTestVisible="False"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   FontSize="14"
+                                   VerticalAlignment="Top" HorizontalAlignment="Left"
+                                   Margin="1,2,0,0"/>
+
+                        <!-- 快捷键提示 + 实时字数 -->
+                        <Grid Grid.Row="1" Margin="1,6,1,0">
+                            <TextBlock Text="Enter 发送 / Shift + Enter 换行" Style="{StaticResource HintTextStyle}"/>
+                            <TextBlock x:Name="CharCountLabel"
+                                       Text="0/2000"
+                                       Style="{StaticResource HintTextStyle}"
+                                       HorizontalAlignment="Right"/>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!--
+                    底部按钮栏：历史 / 取消录音 / 麦克风 / 发送 / 收起
+                    麦克风与取消按钮的图标、颜色、启用状态、可见性全部由 ApplyUiState 统一设置，
+                    这里只给初始值（空闲态：蓝色麦克风、无取消按钮）。
+                -->
+                <Grid Grid.Row="1" Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>  <!-- 0 历史 -->
+                        <ColumnDefinition Width="*"/>     <!-- 1 留白 -->
+                        <ColumnDefinition Width="Auto"/>  <!-- 2 取消录音（仅录音中显示） -->
+                        <ColumnDefinition Width="Auto"/>  <!-- 3 麦克风 / 停止播放 -->
+                        <ColumnDefinition Width="Auto"/>  <!-- 4 发送 -->
+                        <ColumnDefinition Width="Auto"/>  <!-- 5 收起 -->
+                    </Grid.ColumnDefinitions>
+
+                    <Button x:Name="HistoryButton" Grid.Column="0"
+                            Style="{StaticResource PillButtonStyle}"
+                            IsEnabled="False"
+                            Click="HistoryButton_Click"
+                            ToolTip="查看最近会话记录"
+                            ToolTipService.ShowOnDisabled="True">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE81C;" Style="{StaticResource GlyphTextStyle}"/>
+                            <TextBlock Text="历史" Style="{StaticResource ButtonTextStyle}" Margin="6,0,0,0"/>
+                        </StackPanel>
+                    </Button>
+
+                    <!-- 取消录音：只在录音中有意义，其余状态由 ApplyUiState 收起 -->
+                    <Button x:Name="CancelRecordButton" Grid.Column="2" Margin="0,0,8,0"
+                            Style="{StaticResource PillButtonStyle}"
+                            MinWidth="76"
+                            Visibility="Collapsed"
+                            Click="CancelRecord_Click"
+                            ToolTip="取消本次录音（不发送）">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE711;" Style="{StaticResource GlyphTextStyle}"/>
+                            <TextBlock Text="取消" Style="{StaticResource ButtonTextStyle}" Margin="6,0,0,0"/>
+                        </StackPanel>
+                    </Button>
+
+                    <!-- 主操作按钮：空闲=开始录音 / 录音中&播放中=停止 -->
+                    <Button x:Name="MicButton" Grid.Column="3"
+                            Style="{StaticResource PrimaryRoundButtonStyle}"
+                            Click="MicButton_Click"
+                            ToolTip="点击开始录音">
+                        <TextBlock x:Name="MicGlyph" Text="&#xE720;" Style="{StaticResource GlyphTextStyle}"/>
+                    </Button>
+
+                    <Button x:Name="SendButton" Grid.Column="4" Margin="8,0,0,0"
+                             Style="{StaticResource PrimaryButtonStyle}"
+                             IsEnabled="False"
+                             Click="SendText_Click"
+                             ToolTip="发送文本"
+                             ToolTipService.ShowOnDisabled="True">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE725;" Style="{StaticResource GlyphTextStyle}"/>
+                            <TextBlock Text="发送" Style="{StaticResource ButtonTextStyle}" Margin="6,0,0,0"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Button x:Name="CollapseButton" Grid.Column="5" Margin="8,0,0,0"
+                            Style="{StaticResource IconButtonStyle}"
+                            Click="CollapseInput_Click"
+                            ToolTip="收起输入框">
+                        <TextBlock Text="&#xE70D;" Style="{StaticResource GlyphTextStyle}"/>
+                    </Button>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- ===== 3. 展开入口：仅在收起状态显示，展开后隐藏 ===== -->
+        <Button x:Name="ExpandInputButton" Grid.Row="3"
+                Style="{StaticResource PillButtonStyle}"
+                Click="ExpandInput_Click"
+                HorizontalAlignment="Center"
+                Margin="0,4,0,0"
+                ToolTip="展开输入框">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="&#xE70E;" Style="{StaticResource GlyphTextStyle}"/>
+                <TextBlock Text="输入" Style="{StaticResource ButtonTextStyle}" Margin="6,0,0,0"/>
+            </StackPanel>
+        </Button>
+
+    </Grid>
 </Window>

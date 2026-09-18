@@ -1,0 +1,73 @@
+<Window x:Class="WanwanDesktop.Windows.HistoryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="会话历史"
+        Width="520" Height="620"
+        MinWidth="420" MinHeight="420"
+        WindowStartupLocation="CenterOwner"
+        Background="#FFF7F9FC"
+        FontFamily="Microsoft YaHei UI"
+        ShowInTaskbar="False">
+    <!-- 历史窗口只负责展示最近记录；读取和容错逻辑放在 ConversationHistoryService。 -->
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="2,0,2,14">
+            <TextBlock Text="会话历史" FontSize="22" FontWeight="SemiBold" Foreground="#FF1F2937"/>
+            <TextBlock Text="最近 50 条本地文本与语音记录" Margin="0,4,0,0"
+                       FontSize="12" Foreground="#FF6B7280"/>
+        </StackPanel>
+
+        <Grid Grid.Row="1">
+            <TextBlock x:Name="EmptyLabel"
+                       Text="暂时还没有会话记录"
+                       Foreground="#FF6B7280" FontSize="14"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+            <ListBox x:Name="HistoryList"
+                     Background="Transparent" BorderThickness="0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="Padding" Value="0"/>
+                        <Setter Property="Margin" Value="0,0,0,10"/>
+                        <Setter Property="Focusable" Value="False"/>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <!-- 每条记录是一张只读卡片，旧记录缺字段时由模型的 Display 属性兜底。 -->
+                        <Border Background="White" BorderBrush="#FFE5E7EB" BorderThickness="1"
+                                CornerRadius="14" Padding="14">
+                            <StackPanel>
+                                <DockPanel LastChildFill="False">
+                                    <Border Background="#FFEFF6FF" CornerRadius="10" Padding="8,3">
+                                        <TextBlock Text="{Binding DisplayInputType}" FontSize="11" Foreground="#FF2563EB"/>
+                                    </Border>
+                                    <TextBlock Text="{Binding DisplayTime}" Margin="10,2,0,0"
+                                               FontSize="11" Foreground="#FF9CA3AF"/>
+                                </DockPanel>
+
+                                <TextBlock Text="我" Margin="0,10,0,2" FontSize="11" Foreground="#FF6B7280"/>
+                                <TextBlock Text="{Binding DisplayUserText}" TextWrapping="Wrap"
+                                           FontSize="13" Foreground="#FF1F2937"/>
+
+                                <TextBlock Text="晚晚" Margin="0,10,0,2" FontSize="11" Foreground="#FF6B7280"/>
+                                <TextBlock Text="{Binding DisplayReplyText}" TextWrapping="Wrap"
+                                           FontSize="13" Foreground="#FF1F2937"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
+
+        <Button Grid.Row="2" Content="关闭" Width="88" Height="36" Margin="0,14,0,0"
+                HorizontalAlignment="Right" Click="Close_Click"/>
+    </Grid>
+</Window>
