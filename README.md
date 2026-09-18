@@ -41,6 +41,28 @@ dotnet run --project src\WanwanDesktop\WanwanDesktop.csproj
 
 API Key 可以填写到本地设置页，也可以从 `.env.example` 复制为 `.env` 后配置。`.env`、运行配置、日志、会话、录音和 TTS 文件均不会提交到 Git。
 
+## 一键启动（Windows）
+
+以上依赖装好之后，日常启动只需双击：
+
+```bat
+scripts\dev_start.bat
+```
+
+脚本按三步执行：
+
+1. 用 `.venv\Scripts\python.exe` 运行 `scripts\check_env.py` 做环境自检（项目结构、配置文件、虚拟环境、运行目录可写性）
+2. 检查 `dotnet` 命令是否可用
+3. 自检通过后执行 `dotnet run --project src\WanwanDesktop\WanwanDesktop.csproj` 启动 WPF 桌宠，退出后显示退出码
+
+自检输出区分 `[错误]` 和 `[警告]`：出现 `[错误]` 时脚本不启动桌宠，保留窗口显示处理办法并返回非零退出码；`[警告]` 不影响启动。
+
+脚本只做检查：不联网、不安装依赖、不自动创建或覆盖 `data\config\app_settings.json`、不修改系统环境。也可以单独运行自检：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\check_env.py
+```
+
 ## 桌面交互
 
 - 点击猫咪或底部“输入”按钮：展开文本面板
@@ -69,7 +91,7 @@ python -m pytest -q -p no:cacheprovider
 dotnet build src\WanwanDesktop\WanwanDesktop.csproj --no-restore
 ```
 
-当前回归基线：Python 44 项测试通过，WPF 构建 0 警告、0 错误。
+当前回归基线：Python 58 项测试通过，WPF 构建 0 警告、0 错误。
 
 ## 接口约定
 
